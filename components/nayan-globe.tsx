@@ -26,6 +26,7 @@ export default function NayanGlobe() {
 
   useEffect(() => {
     let viewer: any = null;
+    let CesiumRef: any = null;
     let cancelled = false;
     let earthquakeEntities: any[] = [];
     let earthquakeAbortController: AbortController | null = null;
@@ -40,7 +41,7 @@ export default function NayanGlobe() {
     };
 
     const showEarthquakes = async () => {
-      if (!viewer || viewer.isDestroyed()) return;
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
 
       clearEarthquakes();
       earthquakeAbortController?.abort();
@@ -55,23 +56,24 @@ export default function NayanGlobe() {
           const entity = viewer.entities.add({
             id: `nayan-earthquake-${earthquake.id}`,
             name: `Magnitude ${earthquake.magnitude.toFixed(1)} earthquake`,
-            position: Cesium.Cartesian3.fromDegrees(
+            position: CesiumRef.Cartesian3.fromDegrees(
               earthquake.longitude,
               earthquake.latitude,
               0,
             ),
             point: {
               pixelSize: size,
-              color: Cesium.Color.WHITE,
-              outlineColor: Cesium.Color.fromAlpha(Cesium.Color.BLACK, 0.85),
+              color: CesiumRef.Color.WHITE,
+              outlineColor: CesiumRef.Color.fromAlpha(CesiumRef.Color.BLACK, 0.85),
               outlineWidth: 2,
-              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              heightReference: CesiumRef.HeightReference.CLAMP_TO_GROUND,
+              // Zero keeps depth testing enabled, so events on the far side
+              // of the globe cannot render through the Earth.
               disableDepthTestDistance: 0,
-              scaleByDistance: new Cesium.NearFarScalar(500000, 1.15, 18000000, 0.7),
+              scaleByDistance: new CesiumRef.NearFarScalar(500000, 1.15, 18000000, 0.7),
             },
           });
 
-          // Keep the normalized event attached to the Cesium entity for picking.
           entity._nayanEarthquake = earthquake;
           earthquakeEntities.push(entity);
         }
@@ -94,20 +96,20 @@ export default function NayanGlobe() {
     };
 
     const resetIndia = () => {
-      if (!viewer || viewer.isDestroyed()) return;
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(
+        destination: CesiumRef.Cartesian3.fromDegrees(
           INDIA_CAMERA.longitude,
           INDIA_CAMERA.latitude,
           INDIA_CAMERA.height,
         ),
         orientation: {
           heading: 0,
-          pitch: Cesium.Math.toRadians(-90),
+          pitch: CesiumRef.Math.toRadians(-90),
           roll: 0,
         },
       });
-      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      viewer.camera.lookAtTransform(CesiumRef.Matrix4.IDENTITY);
       viewer.scene.requestRender();
     };
 
@@ -151,6 +153,7 @@ export default function NayanGlobe() {
       if (cancelled || !containerRef.current || !window.Cesium) return;
 
       const Cesium = window.Cesium;
+      CesiumRef = Cesium;
 
       const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
       if (ionToken && Cesium.Ion) {
@@ -212,20 +215,7 @@ export default function NayanGlobe() {
       controller.inertiaTranslate = 0.88;
       controller.inertiaZoom = 0.82;
 
-      viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(
-          INDIA_CAMERA.longitude,
-          INDIA_CAMERA.latitude,
-          INDIA_CAMERA.height,
-        ),
-        orientation: {
-          heading: 0,
-          pitch: Cesium.Math.toRadians(-90),
-          roll: 0,
-        },
-      });
-
-      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      resetIndia();
 
       viewer.screenSpaceEventHandler.setInputAction((movement: any) => {
         if (!viewer || viewer.isDestroyed()) return;
