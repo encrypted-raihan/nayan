@@ -67,8 +67,6 @@ export default function NayanGlobe() {
               outlineColor: CesiumRef.Color.fromAlpha(CesiumRef.Color.BLACK, 0.85),
               outlineWidth: 2,
               heightReference: CesiumRef.HeightReference.CLAMP_TO_GROUND,
-              // Zero keeps depth testing enabled, so events on the far side
-              // of the globe cannot render through the Earth.
               disableDepthTestDistance: 0,
               scaleByDistance: new CesiumRef.NearFarScalar(500000, 1.15, 18000000, 0.7),
             },
@@ -226,7 +224,11 @@ export default function NayanGlobe() {
         if (earthquake) {
           window.dispatchEvent(
             new CustomEvent("nayan:earthquake-selected", {
-              detail: earthquake,
+              detail: {
+                earthquake,
+                x: movement.position.x,
+                y: movement.position.y,
+              },
             }),
           );
           return;
