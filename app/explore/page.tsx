@@ -3,19 +3,19 @@
 import { useState } from "react";
 import NayanGlobe from "../../components/nayan-globe";
 
-type DemoLayer = {
+type Layer = {
   id: string;
   label: string;
   detail: string;
-  status: "demo" | "ready";
+  live: boolean;
 };
 
-const layers: DemoLayer[] = [
-  { id: "earthquakes", label: "Earthquakes", detail: "SEISMIC ACTIVITY", status: "demo" },
-  { id: "events", label: "Natural Events", detail: "GLOBAL EVENTS", status: "demo" },
-  { id: "satellites", label: "Satellites", detail: "ORBITAL OBJECTS", status: "demo" },
-  { id: "aircraft", label: "Aircraft", detail: "LIVE FLIGHT TRAFFIC", status: "demo" },
-  { id: "ships", label: "Ships", detail: "MARITIME TRAFFIC", status: "demo" },
+const layers: Layer[] = [
+  { id: "earthquakes", label: "Earthquakes", detail: "SEISMIC ACTIVITY", live: true },
+  { id: "events", label: "Natural Events", detail: "GLOBAL EVENTS", live: false },
+  { id: "satellites", label: "Satellites", detail: "ORBITAL OBJECTS", live: false },
+  { id: "aircraft", label: "Aircraft", detail: "LIVE FLIGHT TRAFFIC", live: false },
+  { id: "ships", label: "Ships", detail: "MARITIME TRAFFIC", live: false },
 ];
 
 export default function ExplorePage() {
@@ -24,11 +24,21 @@ export default function ExplorePage() {
   const [mapMode, setMapMode] = useState("Satellite");
   const [notice, setNotice] = useState("");
 
-  const toggleLayer = (id: string) => {
+  const toggleLayer = (id: string, live: boolean) => {
+    const enabled = !activeLayers.includes(id);
     setActiveLayers((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+      enabled ? [...current, id] : current.filter((item) => item !== id),
     );
-    setNotice("Demo control — this layer will become live when its data provider is connected.");
+
+    window.dispatchEvent(
+      new CustomEvent("nayan:layer-toggle", { detail: { id, enabled } }),
+    );
+
+    if (!live) {
+      setNotice("Demo control — this layer will become live when its data provider is connected.");
+    } else {
+      setNotice(enabled ? "Earthquake layer loading…" : "Earthquake layer hidden");
+    }
   };
 
   const resetIndia = () => {
@@ -49,15 +59,10 @@ export default function ExplorePage() {
       </header>
 
       <div className="explore-corner explore-corner--left">
-        <span>01</span>
-        <span className="corner-line" />
-        <span>EXPLORE</span>
+        <span>01</span><span className="corner-line" /><span>EXPLORE</span>
       </div>
-
       <div className="explore-corner explore-corner--right">
-        <span>GLOBAL VIEW</span>
-        <span className="corner-line" />
-        <span>3D</span>
+        <span>GLOBAL VIEW</span><span className="corner-line" /><span>3D</span>
       </div>
 
       <button
@@ -79,11 +84,7 @@ export default function ExplorePage() {
         </div>
 
         <section className="hub-section">
-          <div className="section-label">
-            <span>LAYERS</span>
-            <span>05</span>
-          </div>
-
+          <div className="section-label"><span>LAYERS</span><span>05</span></div>
           <div className="layer-list">
             {layers.map((layer) => {
               const active = activeLayers.includes(layer.id);
@@ -91,14 +92,14 @@ export default function ExplorePage() {
                 <button
                   key={layer.id}
                   className={`layer-row ${active ? "is-active" : ""}`}
-                  onClick={() => toggleLayer(layer.id)}
+                  onClick={() => toggleLayer(layer.id, layer.live)}
                 >
                   <span className="layer-state"><i /></span>
                   <span className="layer-copy">
                     <strong>{layer.label}</strong>
                     <small>{layer.detail}</small>
                   </span>
-                  <span className="layer-status">{layer.status === "ready" ? "LIVE" : "DEMO"}</span>
+                  <span className="layer-status">{layer.live ? "LIVE" : "DEMO"}</span>
                 </button>
               );
             })}
@@ -109,16 +110,10 @@ export default function ExplorePage() {
           <div className="section-label"><span>MAP</span><span>02</span></div>
           <div className="segmented-control">
             {["Satellite", "Terrain"].map((mode) => (
-              <button
-                key={mode}
-                className={mapMode === mode ? "is-selected" : ""}
-                onClick={() => {
-                  setMapMode(mode);
-                  setNotice(`${mode} mode selected — demo control for now.`);
-                }}
-              >
-                {mode}
-              </button>
+              <button key={mode} className={mapMode === mode ? "is-selected" : ""} onClick={() => {
+                setMapMode(mode);
+                setNotice(`${mode} mode selected — demo control for now.`);
+              }}>{mode}</button>
             ))}
           </div>
         </section>
@@ -126,22 +121,18 @@ export default function ExplorePage() {
         <section className="hub-section hub-section--compact">
           <div className="section-label"><span>VIEW</span><span>01</span></div>
           <button className="reset-view" onClick={resetIndia}>
-            <span>Reset to India</span>
-            <span>↗</span>
+            <span>Reset to India</span><span>↗</span>
           </button>
         </section>
 
         <div className="hub-footer">
-          <span>DATA SYSTEM</span>
-          <span>FOUNDATION / 01</span>
+          <span>DATA SYSTEM</span><span>FOUNDATION / 01</span>
         </div>
       </aside>
 
       {notice && (
         <button className="hub-notice" onClick={() => setNotice("")}>
-          <span className="notice-dot" />
-          {notice}
-          <b>×</b>
+          <span className="notice-dot" />{notice}<b>×</b>
         </button>
       )}
     </main>
