@@ -112,10 +112,32 @@ h1 span { color: transparent; -webkit-text-stroke: 1px rgba(240, 239, 235, 0.48)
 .footer-index { color: var(--muted); }
 
 .explore-page {
+  position: relative;
   width: 100vw;
   height: 100dvh;
-  min-height: 100%;
-  background: var(--charcoal);
+  overflow: hidden;
+  background: #000;
+}
+
+.nayan-globe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.nayan-globe .cesium-viewer,
+.nayan-globe .cesium-widget,
+.nayan-globe canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.nayan-globe .cesium-widget-credits {
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  opacity: 0.55;
 }
 
 @keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
