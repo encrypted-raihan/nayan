@@ -11,6 +11,12 @@ type DemoLayer = {
   status: "demo" | "live";
 };
 
+type EarthquakeSelection = {
+  earthquake: NayanEarthquake;
+  x: number;
+  y: number;
+};
+
 const layers: DemoLayer[] = [
   { id: "earthquakes", label: "Earthquakes", detail: "INDIA + SURROUNDING REGION", status: "live" },
   { id: "events", label: "Natural Events", detail: "GLOBAL EVENTS", status: "demo" },
@@ -32,12 +38,12 @@ export default function ExplorePage() {
   const [activeLayers, setActiveLayers] = useState<string[]>([]);
   const [mapMode, setMapMode] = useState("Satellite");
   const [notice, setNotice] = useState("");
-  const [selectedEarthquake, setSelectedEarthquake] = useState<NayanEarthquake | null>(null);
+  const [selectedEarthquake, setSelectedEarthquake] = useState<EarthquakeSelection | null>(null);
   const [earthquakeCount, setEarthquakeCount] = useState<number | null>(null);
 
   useEffect(() => {
     const onSelected = (event: Event) => {
-      setSelectedEarthquake((event as CustomEvent<NayanEarthquake>).detail);
+      setSelectedEarthquake((event as CustomEvent<EarthquakeSelection>).detail);
     };
 
     const onDeselected = () => setSelectedEarthquake(null);
@@ -81,6 +87,7 @@ export default function ExplorePage() {
 
   const resetIndia = () => {
     window.dispatchEvent(new CustomEvent("nayan:reset-india"));
+    setSelectedEarthquake(null);
     setNotice("India view reset");
   };
 
@@ -109,12 +116,22 @@ export default function ExplorePage() {
       </div>
 
       {selectedEarthquake && (
-        <aside className="earthquake-detail">
+        <aside
+          className="earthquake-detail earthquake-detail--anchored"
+          style={{
+            left: selectedEarthquake.x > window.innerWidth / 2
+              ? Math.max(16, selectedEarthquake.x - 356)
+              : Math.min(window.innerWidth - 356, selectedEarthquake.x + 18),
+            top: selectedEarthquake.y > window.innerHeight / 2
+              ? Math.max(16, selectedEarthquake.y - 292)
+              : Math.min(window.innerHeight - 292, selectedEarthquake.y + 18),
+          }}
+        >
           <div className="earthquake-detail-top">
             <div>
               <span className="hub-eyebrow">NAYAN / EARTHQUAKE</span>
               <div className="earthquake-magnitude">
-                M{selectedEarthquake.magnitude.toFixed(1)}
+                M{selectedEarthquake.earthquake.magnitude.toFixed(1)}
               </div>
             </div>
             <button
@@ -125,16 +142,16 @@ export default function ExplorePage() {
               ×
             </button>
           </div>
-          <div className="earthquake-place">{selectedEarthquake.place}</div>
+          <div className="earthquake-place">{selectedEarthquake.earthquake.place}</div>
           <div className="earthquake-meta-grid">
-            <div><span>DEPTH</span><strong>{selectedEarthquake.depthKm.toFixed(1)} KM</strong></div>
-            <div><span>TIME</span><strong>{formatEarthquakeTime(selectedEarthquake.time)}</strong></div>
-            <div><span>MAG TYPE</span><strong>{selectedEarthquake.magType ?? "—"}</strong></div>
-            <div><span>TSUNAMI</span><strong>{selectedEarthquake.tsunami ? "YES" : "NO"}</strong></div>
+            <div><span>DEPTH</span><strong>{selectedEarthquake.earthquake.depthKm.toFixed(1)} KM</strong></div>
+            <div><span>TIME</span><strong>{formatEarthquakeTime(selectedEarthquake.earthquake.time)}</strong></div>
+            <div><span>MAG TYPE</span><strong>{selectedEarthquake.earthquake.magType ?? "—"}</strong></div>
+            <div><span>TSUNAMI</span><strong>{selectedEarthquake.earthquake.tsunami ? "YES" : "NO"}</strong></div>
           </div>
           <a
             className="earthquake-source"
-            href={selectedEarthquake.url}
+            href={selectedEarthquake.earthquake.url}
             target="_blank"
             rel="noreferrer"
           >
