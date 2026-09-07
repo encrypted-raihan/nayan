@@ -43,7 +43,7 @@ const INDIA_REGION = {
   maxLongitude: 105,
 };
 
-const MIN_MAGNITUDE = 2.5;
+const MIN_MAGNITUDE = 1.0;
 const DAYS_BACK = 7;
 const MAX_EVENTS = 500;
 
