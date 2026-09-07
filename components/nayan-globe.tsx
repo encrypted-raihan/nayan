@@ -14,6 +14,16 @@ const CESIUM_BASE_URL = `https://cesium.com/downloads/cesiumjs/releases/${CESIUM
 const CESIUM_SCRIPT_URL = `${CESIUM_BASE_URL}Cesium.js`;
 const CESIUM_CSS_URL = `${CESIUM_BASE_URL}Widgets/widgets.css`;
 
+// Keep the whole planet lightweight, while giving India the high-detail aerial
+// layer. The regional overlay is deliberately a rectangle for now; a precise
+// India boundary mask can be added later without changing the architecture.
+const INDIA_IMAGERY_RECTANGLE = {
+  west: 68.0,
+  south: 6.0,
+  east: 98.0,
+  north: 37.5,
+};
+
 export default function NayanGlobe() {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -67,21 +77,31 @@ export default function NayanGlobe() {
         Cesium.Ion.defaultAccessToken = ionToken;
       }
 
-      const [imageryProvider, terrainProvider] = await Promise.all([
-        Cesium.createWorldImageryAsync({
-          style: Cesium.IonWorldImageryStyle.AERIAL,
-        }),
-        Cesium.createWorldTerrainAsync({
-          requestVertexNormals: true,
-          requestWaterMask: true,
-        }),
-      ]);
+      // Global foundation: Sentinel-2 cloudless imagery at roughly 10–60 m.
+      // It keeps distant parts of the planet much lighter than the aerial layer.
+      const globalImagery = await Cesium.IonImageryProvider.fromAssetId(3954);
+
+      // India: high-detail aerial imagery, loaded only inside this regional
+      // rectangle so we don't request expensive high-resolution tiles globally.
+      const indiaImagery = await Cesium.IonImageryProvider.fromAssetId(2);
+
+      const terrainProvider = await Cesium.createWorldTerrainAsync({
+        requestVertexNormals: true,
+        requestWaterMask: true,
+      });
 
       if (cancelled || !containerRef.current) return;
 
+      const indiaRectangle = Cesium.Rectangle.fromDegrees(
+        INDIA_IMAGERY_RECTANGLE.west,
+        INDIA_IMAGERY_RECTANGLE.south,
+        INDIA_IMAGERY_RECTANGLE.east,
+        INDIA_IMAGERY_RECTANGLE.north,
+      );
+
       viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
-        baseLayer: new Cesium.ImageryLayer(imageryProvider),
+        baseLayer: new Cesium.ImageryLayer(globalImagery),
         baseLayerPicker: false,
         fullscreenButton: false,
         geocoder: false,
@@ -97,6 +117,17 @@ export default function NayanGlobe() {
 
       const scene = viewer.scene;
       const globe = scene.globe;
+
+      const indiaLayer = viewer.imageryLayers.add(
+        new Cesium.ImageryLayer(indiaImagery, {
+          rectangle: indiaRectangle,
+          maximumAnisotropy: 4,
+          minimumTerrainLevel: 1,
+        }),
+      );
+      indiaLayer.brightness = 1.02;
+      indiaLayer.contrast = 1.02;
+      indiaLayer.saturation = 1.03;
 
       scene.backgroundColor = Cesium.Color.BLACK;
       scene.skyBox.show = true;
@@ -117,9 +148,7 @@ export default function NayanGlobe() {
       scene.screenSpaceCameraController.minimumZoomDistance = 50.0;
       scene.screenSpaceCameraController.maximumZoomDistance = 4.0e8;
 
-      // NAYAN opens on India by default. The camera is positioned over the
-      // geographic center of India and kept close enough that India is the
-      // unmistakable front-facing region of the globe.
+      // NAYAN opens on India by default.
       viewer.camera.setView({
         destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 6500000),
         orientation: {
