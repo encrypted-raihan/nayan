@@ -40,9 +40,11 @@ export default function NayanGlobe() {
 
           if (existing) {
             existing.addEventListener("load", () => resolve(), { once: true });
-            existing.addEventListener("error", () => reject(new Error("Cesium failed to load")), {
-              once: true,
-            });
+            existing.addEventListener(
+              "error",
+              () => reject(new Error("Cesium failed to load")),
+              { once: true },
+            );
             return;
           }
 
@@ -59,11 +61,26 @@ export default function NayanGlobe() {
       if (cancelled || !containerRef.current || !window.Cesium) return;
 
       const Cesium = window.Cesium;
-      const imageryProvider = new Cesium.UrlTemplateImageryProvider({
-        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        credit: "© OpenStreetMap contributors",
-        maximumLevel: 19,
-      });
+
+      // A user-provided ion token can be supplied later without changing the
+      // globe implementation. NAYAN is currently using Cesium's free,
+      // non-commercial Community access path.
+      const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
+      if (ionToken && Cesium.Ion) {
+        Cesium.Ion.defaultAccessToken = ionToken;
+      }
+
+      const [imageryProvider, terrainProvider] = await Promise.all([
+        Cesium.createWorldImageryAsync({
+          style: Cesium.IonWorldImageryStyle.AERIAL,
+        }),
+        Cesium.createWorldTerrainAsync({
+          requestVertexNormals: true,
+          requestWaterMask: true,
+        }),
+      ]);
+
+      if (cancelled || !containerRef.current) return;
 
       viewer = new Cesium.Viewer(containerRef.current, {
         animation: false,
@@ -78,26 +95,51 @@ export default function NayanGlobe() {
         selectionIndicator: false,
         timeline: false,
         shouldAnimate: false,
+        terrainProvider,
       });
 
-      viewer.scene.backgroundColor = Cesium.Color.BLACK;
-      viewer.scene.globe.showGroundAtmosphere = true;
-      viewer.scene.skyAtmosphere.show = true;
-      viewer.scene.globe.enableLighting = false;
-      viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+      const scene = viewer.scene;
+      const globe = scene.globe;
 
+      scene.backgroundColor = Cesium.Color.BLACK;
+      scene.skyBox.show = true;
+      scene.skyAtmosphere.show = true;
+      scene.skyAtmosphere.brightnessShift = 0.02;
+      scene.skyAtmosphere.saturationShift = 0.02;
+      scene.skyAtmosphere.hueShift = 0.0;
+
+      // Let the Sun create the natural day/night separation and reveal terrain.
+      globe.enableLighting = true;
+      globe.showGroundAtmosphere = true;
+      globe.dynamicAtmosphereLighting = true;
+      globe.dynamicAtmosphereLightingFromSun = true;
+      globe.lightingFadeInDistance = 3.0e6;
+      globe.lightingFadeOutDistance = 6.0e7;
+      globe.terrainExaggeration = 1.0;
+
+      scene.screenSpaceCameraController.enableCollisionDetection = false;
+      scene.screenSpaceCameraController.minimumZoomDistance = 50.0;
+      scene.screenSpaceCameraController.maximumZoomDistance = 4.0e8;
+
+      // Start with India facing the viewer, but close enough for terrain and
+      // coastline detail to read as the user begins exploring.
       viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 14000000),
+        destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 8500000),
         orientation: {
           heading: 0,
           pitch: Cesium.Math.toRadians(-90),
           roll: 0,
         },
       });
+
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      viewer.scene.requestRender();
     };
 
     loadCesium().catch((error) => {
-      if (!cancelled) console.error("NAYAN globe failed to initialize:", error);
+      if (!cancelled) {
+        console.error("NAYAN globe failed to initialize:", error);
+      }
     });
 
     return () => {
@@ -106,5 +148,11 @@ export default function NayanGlobe() {
     };
   }, []);
 
-  return <div ref={containerRef} className="nayan-globe" aria-label="NAYAN 3D globe" />;
+  return (
+    <div
+      ref={containerRef}
+      className="nayan-globe"
+      aria-label="NAYAN 3D globe"
+    />
+  );
 }
