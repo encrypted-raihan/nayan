@@ -121,10 +121,14 @@ export default function ExplorePage() {
           style={{
             left: selectedEarthquake.x > window.innerWidth / 2
               ? Math.max(16, selectedEarthquake.x - 356)
-              : Math.min(window.innerWidth - 356, selectedEarthquake.x + 18),
+              : Math.min(Math.max(16, window.innerWidth - 356), selectedEarthquake.x + 18),
             top: selectedEarthquake.y > window.innerHeight / 2
               ? Math.max(16, selectedEarthquake.y - 292)
-              : Math.min(window.innerHeight - 292, selectedEarthquake.y + 18),
+              : Math.min(Math.max(16, window.innerHeight - 292), selectedEarthquake.y + 18),
+            right: "auto",
+            bottom: "auto",
+            transform: "none",
+            width: "min(340px, calc(100vw - 32px))",
           }}
         >
           <div className="earthquake-detail-top">
