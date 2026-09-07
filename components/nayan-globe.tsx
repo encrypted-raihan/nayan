@@ -67,10 +67,6 @@ export default function NayanGlobe() {
         Cesium.Ion.defaultAccessToken = ionToken;
       }
 
-      // Use one continuous global aerial layer. Cesium already streams imagery
-      // according to what is visible and the camera's level of detail, so a
-      // hard India-only rectangle is unnecessary and creates an ugly seam.
-      // India will become highly detailed naturally as the camera gets closer.
       const [imageryProvider, terrainProvider] = await Promise.all([
         Cesium.createWorldImageryAsync({
           style: Cesium.IonWorldImageryStyle.AERIAL,
@@ -101,6 +97,7 @@ export default function NayanGlobe() {
 
       const scene = viewer.scene;
       const globe = scene.globe;
+      const controller = scene.screenSpaceCameraController;
 
       scene.backgroundColor = Cesium.Color.BLACK;
       scene.skyBox.show = true;
@@ -109,7 +106,6 @@ export default function NayanGlobe() {
       scene.skyAtmosphere.saturationShift = 0.02;
       scene.skyAtmosphere.hueShift = 0.0;
 
-      // Natural Sun lighting keeps the globe dimensional without adding UI.
       globe.enableLighting = true;
       globe.showGroundAtmosphere = true;
       globe.dynamicAtmosphereLighting = true;
@@ -118,14 +114,19 @@ export default function NayanGlobe() {
       globe.lightingFadeOutDistance = 6.0e7;
       globe.terrainExaggeration = 1.0;
 
-      scene.screenSpaceCameraController.enableCollisionDetection = false;
-      scene.screenSpaceCameraController.minimumZoomDistance = 50.0;
-      scene.screenSpaceCameraController.maximumZoomDistance = 4.0e8;
+      // Keep the globe easy to control without letting the camera get lost.
+      controller.enableCollisionDetection = false;
+      controller.minimumZoomDistance = 50.0;
+      controller.maximumZoomDistance = 4.0e8;
+      controller.inertiaSpin = 0.88;
+      controller.inertiaTranslate = 0.88;
+      controller.inertiaZoom = 0.82;
 
-      // Restore the original NAYAN opening view: India centered and clearly
-      // presented without zooming so far in that the globe loses context.
+      // NAYAN opening view: the camera is directly above central India.
+      // 6,500 km keeps India prominent while preserving enough planetary
+      // context to understand that this is an India-from-above view.
       viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 8500000),
+        destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 6500000),
         orientation: {
           heading: 0,
           pitch: Cesium.Math.toRadians(-90),
@@ -133,6 +134,8 @@ export default function NayanGlobe() {
         },
       });
 
+      // Reset any inherited transform so subsequent drag/zoom starts from the
+      // same clean globe coordinate frame.
       viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       viewer.scene.requestRender();
     };
