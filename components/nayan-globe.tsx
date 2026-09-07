@@ -62,9 +62,6 @@ export default function NayanGlobe() {
 
       const Cesium = window.Cesium;
 
-      // A user-provided ion token can be supplied later without changing the
-      // globe implementation. NAYAN is currently using Cesium's free,
-      // non-commercial Community access path.
       const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
       if (ionToken && Cesium.Ion) {
         Cesium.Ion.defaultAccessToken = ionToken;
@@ -108,7 +105,6 @@ export default function NayanGlobe() {
       scene.skyAtmosphere.saturationShift = 0.02;
       scene.skyAtmosphere.hueShift = 0.0;
 
-      // Let the Sun create the natural day/night separation and reveal terrain.
       globe.enableLighting = true;
       globe.showGroundAtmosphere = true;
       globe.dynamicAtmosphereLighting = true;
@@ -121,10 +117,11 @@ export default function NayanGlobe() {
       scene.screenSpaceCameraController.minimumZoomDistance = 50.0;
       scene.screenSpaceCameraController.maximumZoomDistance = 4.0e8;
 
-      // Start with India facing the viewer, but close enough for terrain and
-      // coastline detail to read as the user begins exploring.
+      // NAYAN opens on India by default. The camera is positioned over the
+      // geographic center of India and kept close enough that India is the
+      // unmistakable front-facing region of the globe.
       viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 8500000),
+        destination: Cesium.Cartesian3.fromDegrees(78.9629, 22.5937, 6500000),
         orientation: {
           heading: 0,
           pitch: Cesium.Math.toRadians(-90),
