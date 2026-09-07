@@ -16,19 +16,16 @@ export default function Home() {
         const Cesium = await import("cesium");
         if (cancelled || !containerRef.current) return;
 
-        const token = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
+        const token = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN?.trim();
         if (token) Cesium.Ion.defaultAccessToken = token;
 
-        const imageryProvider = token
-          ? await Cesium.IonImageryProvider.fromAssetId(2)
-          : new Cesium.OpenStreetMapImageryProvider({
-              url: "https://tile.openstreetmap.org/",
-              credit: "© OpenStreetMap contributors",
-            });
-
+        // Cesium 1.134+ uses `baseLayer`, not the old `imageryProvider`
+        // Viewer option. Disable the default ion/Bing layer first so a
+        // missing or invalid ion token cannot stop the renderer.
         viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
           baseLayerPicker: false,
+          baseLayer: false,
           fullscreenButton: false,
           geocoder: false,
           homeButton: false,
@@ -38,28 +35,53 @@ export default function Home() {
           selectionIndicator: false,
           timeline: false,
           vrButton: false,
-          imageryProvider,
           terrainProvider: new Cesium.EllipsoidTerrainProvider(),
         });
 
-        viewer.scene.globe.enableLighting = true;
-        viewer.scene.skyAtmosphere.show = true;
-        viewer.scene.globe.showGroundAtmosphere = true;
-        viewer.scene.backgroundColor = Cesium.Color.BLACK;
+        let imageryProvider: import("cesium").ImageryProvider;
 
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(
-            INDIA.longitude,
-            INDIA.latitude,
-            INDIA.height,
-          ),
-          orientation: {
-            heading: Cesium.Math.toRadians(0),
-            pitch: Cesium.Math.toRadians(-90),
-            roll: 0,
-          },
-          duration: 2.8,
-        });
+        if (token) {
+          try {
+            imageryProvider = await Cesium.IonImageryProvider.fromAssetId(2);
+          } catch (ionError) {
+            console.warn(
+              "NAYAN: Cesium ion imagery unavailable; using OpenStreetMap fallback.",
+              ionError,
+            );
+            imageryProvider = new Cesium.OpenStreetMapImageryProvider({
+              url: "https://tile.openstreetmap.org/",
+              credit: "© OpenStreetMap contributors",
+            });
+          }
+        } else {
+          imageryProvider = new Cesium.OpenStreetMapImageryProvider({
+            url: "https://tile.openstreetmap.org/",
+            credit: "© OpenStreetMap contributors",
+          });
+        }
+
+        if (!cancelled && viewer && !viewer.isDestroyed()) {
+          viewer.imageryLayers.addImageryProvider(imageryProvider);
+
+          viewer.scene.globe.enableLighting = true;
+          viewer.scene.skyAtmosphere.show = true;
+          viewer.scene.globe.showGroundAtmosphere = true;
+          viewer.scene.backgroundColor = Cesium.Color.BLACK;
+
+          viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(
+              INDIA.longitude,
+              INDIA.latitude,
+              INDIA.height,
+            ),
+            orientation: {
+              heading: Cesium.Math.toRadians(0),
+              pitch: Cesium.Math.toRadians(-90),
+              roll: 0,
+            },
+            duration: 2.8,
+          });
+        }
       } catch (error) {
         console.error("NAYAN globe failed to initialize", error);
       }
