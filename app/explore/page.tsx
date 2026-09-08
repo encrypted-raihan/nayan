@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import NayanGlobe from "../../components/nayan-globe";
 import type { NayanEarthquake } from "../../lib/data/usgs-earthquakes";
 import type { NayanNaturalEvent } from "../../lib/data/eonet-natural-events";
-import type { NayanSatellite } from "../../lib/data/satellites";
+import type { NayanSatellite, NayanSatelliteCategory } from "../../lib/data/satellites";
 
 type Layer = { id: string; label: string; detail: string; status: "demo" | "live"; icon: string };
 type EarthquakeSelection = { earthquake: NayanEarthquake; x: number; y: number };
 type NaturalEventSelection = { event: NayanNaturalEvent; x: number; y: number };
 type SatelliteSelection = { satellite: NayanSatellite; x: number; y: number };
+type SatelliteFilterMode = "important" | "all" | "category";
+
+type SatelliteFilter = { mode: SatelliteFilterMode; category?: NayanSatelliteCategory };
 
 const layers: Layer[] = [
   { id: "earthquakes", label: "Earthquakes", detail: "INDIA + SURROUNDING REGION", status: "live", icon: "🌋" },
@@ -17,6 +20,17 @@ const layers: Layer[] = [
   { id: "satellites", label: "Satellites", detail: "ACTIVE ORBITAL OBJECTS", status: "live", icon: "🛰️" },
   { id: "aircraft", label: "Aircraft", detail: "LIVE FLIGHT TRAFFIC", status: "demo", icon: "✈️" },
   { id: "ships", label: "Ships", detail: "MARITIME TRAFFIC", status: "demo", icon: "🚢" },
+];
+
+const satelliteCategories: { id: NayanSatelliteCategory; label: string; icon: string }[] = [
+  { id: "navigation", label: "Navigation", icon: "🧭" },
+  { id: "weather", label: "Weather", icon: "🌦️" },
+  { id: "earth-observation", label: "Earth Observation", icon: "🌍" },
+  { id: "communications", label: "Communications", icon: "📡" },
+  { id: "science", label: "Science", icon: "🔬" },
+  { id: "education", label: "Education / Research", icon: "🎓" },
+  { id: "defense", label: "Defense", icon: "🛡️" },
+  { id: "other", label: "Other", icon: "◌" },
 ];
 
 function formatUtc(timestamp: number) {
@@ -38,6 +52,9 @@ export default function ExplorePage() {
   const [naturalEventCount, setNaturalEventCount] = useState<number | null>(null);
   const [selectedSatellite, setSelectedSatellite] = useState<SatelliteSelection | null>(null);
   const [satelliteCount, setSatelliteCount] = useState<number | null>(null);
+  const [satelliteCatalogCount, setSatelliteCatalogCount] = useState<number | null>(null);
+  const [satelliteFilter, setSatelliteFilter] = useState<SatelliteFilter>({ mode: "important" });
+  const [satelliteControlsOpen, setSatelliteControlsOpen] = useState(false);
 
   useEffect(() => {
     const onEarthquakeSelected = (event: Event) => { setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedEarthquake((event as CustomEvent<EarthquakeSelection>).detail); };
@@ -48,10 +65,14 @@ export default function ExplorePage() {
     const onSatelliteDeselected = () => setSelectedSatellite(null);
     const onEarthquakeLoaded = (event: Event) => { setEarthquakeCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Earthquake layer updated"); };
     const onNaturalEventsLoaded = (event: Event) => { setNaturalEventCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Natural events layer updated"); };
-    const onSatellitesLoaded = (event: Event) => { setSatelliteCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Satellite layer updated"); };
+    const onSatellitesFiltered = (event: Event) => {
+      const detail = (event as CustomEvent<{ count: number; catalogCount: number; filter: SatelliteFilter }>).detail;
+      setSatelliteCount(detail.count);
+      setSatelliteCatalogCount(detail.catalogCount);
+    };
     const onEarthquakesCleared = () => setSelectedEarthquake(null);
     const onNaturalEventsCleared = () => setSelectedNaturalEvent(null);
-    const onSatellitesCleared = () => setSelectedSatellite(null);
+    const onSatellitesCleared = () => { setSelectedSatellite(null); setSatelliteCount(null); };
     const onError = (event: Event) => setNotice((event as CustomEvent<{ message: string }>).detail.message);
 
     window.addEventListener("nayan:earthquake-selected", onEarthquakeSelected);
@@ -62,7 +83,7 @@ export default function ExplorePage() {
     window.addEventListener("nayan:satellite-deselected", onSatelliteDeselected);
     window.addEventListener("nayan:earthquakes-loaded", onEarthquakeLoaded);
     window.addEventListener("nayan:natural-events-loaded", onNaturalEventsLoaded);
-    window.addEventListener("nayan:satellites-loaded", onSatellitesLoaded);
+    window.addEventListener("nayan:satellites-filtered", onSatellitesFiltered);
     window.addEventListener("nayan:earthquakes-cleared", onEarthquakesCleared);
     window.addEventListener("nayan:natural-events-cleared", onNaturalEventsCleared);
     window.addEventListener("nayan:satellites-cleared", onSatellitesCleared);
@@ -79,7 +100,7 @@ export default function ExplorePage() {
       window.removeEventListener("nayan:satellite-deselected", onSatelliteDeselected);
       window.removeEventListener("nayan:earthquakes-loaded", onEarthquakeLoaded);
       window.removeEventListener("nayan:natural-events-loaded", onNaturalEventsLoaded);
-      window.removeEventListener("nayan:satellites-loaded", onSatellitesLoaded);
+      window.removeEventListener("nayan:satellites-filtered", onSatellitesFiltered);
       window.removeEventListener("nayan:earthquakes-cleared", onEarthquakesCleared);
       window.removeEventListener("nayan:natural-events-cleared", onNaturalEventsCleared);
       window.removeEventListener("nayan:satellites-cleared", onSatellitesCleared);
@@ -102,6 +123,12 @@ export default function ExplorePage() {
     window.dispatchEvent(new CustomEvent(id === "earthquakes" ? "nayan:earthquakes-toggle" : id === "events" ? "nayan:natural-events-toggle" : "nayan:satellites-toggle", { detail: enabling }));
   };
 
+  const chooseSatelliteFilter = (filter: SatelliteFilter) => {
+    setSatelliteFilter(filter);
+    setSatelliteControlsOpen(true);
+    window.dispatchEvent(new CustomEvent("nayan:satellite-filter", { detail: filter }));
+  };
+
   const resetIndia = () => {
     window.dispatchEvent(new CustomEvent("nayan:reset-india"));
     setSelectedEarthquake(null);
@@ -109,6 +136,9 @@ export default function ExplorePage() {
     setSelectedSatellite(null);
     setNotice("India view reset");
   };
+
+  const satelliteActive = activeLayers.includes("satellites");
+  const satelliteFilterLabel = satelliteFilter.mode === "important" ? "IMPORTANT" : satelliteFilter.mode === "all" ? "ALL" : satelliteCategories.find((item) => item.id === satelliteFilter.category)?.label.toUpperCase() ?? "CATEGORY";
 
   return (
     <main className="explore-page">
@@ -120,8 +150,9 @@ export default function ExplorePage() {
       {selectedSatellite && <aside className="earthquake-detail earthquake-detail--anchored" style={{ left: selectedSatellite.x > window.innerWidth / 2 ? Math.max(16, selectedSatellite.x - 356) : Math.min(Math.max(16, window.innerWidth - 356), selectedSatellite.x + 18), top: selectedSatellite.y > window.innerHeight / 2 ? Math.max(16, selectedSatellite.y - 292) : Math.min(Math.max(16, window.innerHeight - 292), selectedSatellite.y + 18), right: "auto", bottom: "auto", transform: "none", width: "min(340px, calc(100vw - 32px))" }}>
         <div className="earthquake-detail-top"><div><span className="hub-eyebrow">NAYAN / SATELLITE</span><div className="earthquake-magnitude">🛰️</div></div><button className="earthquake-detail-close" onClick={() => setSelectedSatellite(null)} aria-label="Close satellite details">×</button></div>
         <div className="earthquake-place">{selectedSatellite.satellite.name}</div>
-        <div className="earthquake-meta-grid"><div><span>NORAD</span><strong>{selectedSatellite.satellite.noradCatalogId}</strong></div><div><span>ALTITUDE</span><strong>{selectedSatellite.satellite.altitudeKm.toFixed(0)} KM</strong></div><div><span>SPEED</span><strong>{selectedSatellite.satellite.speedKmPerSecond.toFixed(2)} KM/S</strong></div><div><span>INCLINATION</span><strong>{selectedSatellite.satellite.inclinationDeg.toFixed(2)}°</strong></div></div>
-        <div className="earthquake-meta-grid"><div><span>LATITUDE</span><strong>{selectedSatellite.satellite.latitudeDeg.toFixed(2)}°</strong></div><div><span>LONGITUDE</span><strong>{selectedSatellite.satellite.longitudeDeg.toFixed(2)}°</strong></div><div><span>PERIOD</span><strong>{(1440 / selectedSatellite.satellite.meanMotionRevolutionsPerDay).toFixed(1)} MIN</strong></div><div><span>EPOCH</span><strong>{formatUtc(selectedSatellite.satellite.epoch)}</strong></div></div>
+        <div className="earthquake-meta-grid"><div><span>NORAD</span><strong>{selectedSatellite.satellite.noradCatalogId}</strong></div><div><span>CATEGORY</span><strong>{selectedSatellite.satellite.categoryLabel}</strong></div><div><span>ALTITUDE</span><strong>{selectedSatellite.satellite.altitudeKm.toFixed(0)} KM</strong></div><div><span>SPEED</span><strong>{selectedSatellite.satellite.speedKmPerSecond.toFixed(2)} KM/S</strong></div></div>
+        <div className="earthquake-meta-grid"><div><span>INCLINATION</span><strong>{selectedSatellite.satellite.inclinationDeg.toFixed(2)}°</strong></div><div><span>LATITUDE</span><strong>{selectedSatellite.satellite.latitudeDeg.toFixed(2)}°</strong></div><div><span>LONGITUDE</span><strong>{selectedSatellite.satellite.longitudeDeg.toFixed(2)}°</strong></div><div><span>PERIOD</span><strong>{(1440 / selectedSatellite.satellite.meanMotionRevolutionsPerDay).toFixed(1)} MIN</strong></div></div>
+        <div className="earthquake-meta-grid"><div><span>EPOCH</span><strong>{formatUtc(selectedSatellite.satellite.epoch)}</strong></div></div>
         <a className="earthquake-source" href={`https://celestrak.org/NORAD/elements/?CATNR=${selectedSatellite.satellite.noradCatalogId}`} target="_blank" rel="noreferrer">OPEN CELESTRAK <span>↗</span></a>
       </aside>}
 
@@ -144,13 +175,32 @@ export default function ExplorePage() {
       <aside className={`control-hub ${open ? "is-visible" : ""}`} aria-hidden={!open}>
         <div className="hub-header"><div><span className="hub-eyebrow">NAYAN / SYSTEM</span><h2>Control Hub</h2></div><button className="hub-close" onClick={() => setOpen(false)} aria-label="Close control hub">×</button></div>
         <section className="hub-section"><div className="section-label"><span>LAYERS</span><span>05</span></div><div className="layer-list">
-          {layers.map((layer) => { const active = activeLayers.includes(layer.id); return <button key={layer.id} className={`layer-row ${active ? "is-active" : ""}`} onClick={() => toggleLayer(layer.id)}><span className="layer-icon" aria-hidden="true">{layer.icon}</span><span className="layer-copy"><strong>{layer.label}</strong><small>{layer.detail}</small></span><span className="layer-status">{layer.status === "live" ? "LIVE" : "DEMO"}</span></button>; })}
+          {layers.map((layer) => {
+            const active = activeLayers.includes(layer.id);
+            const satelliteRow = layer.id === "satellites";
+            return <div key={layer.id} className={`layer-group ${satelliteRow && active ? "layer-group--expanded" : ""}`}>
+              <button className={`layer-row ${active ? "is-active" : ""}`} onClick={() => toggleLayer(layer.id)}><span className="layer-icon" aria-hidden="true">{layer.icon}</span><span className="layer-copy"><strong>{layer.label}</strong><small>{layer.detail}</small></span><span className="layer-status">{layer.status === "live" ? "LIVE" : "DEMO"}</span></button>
+              {satelliteRow && active && <div className={`satellite-controls ${satelliteControlsOpen ? "is-open" : ""}`}>
+                <button className="satellite-filter-summary" onClick={() => setSatelliteControlsOpen((value) => !value)}><span>VIEW / {satelliteFilterLabel}</span><span>{satelliteControlsOpen ? "−" : "+"}</span></button>
+                {satelliteControlsOpen && <div className="satellite-filter-panel">
+                  <div className="satellite-filter-tabs">
+                    <button className={satelliteFilter.mode === "important" ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "important" })}>Important</button>
+                    <button className={satelliteFilter.mode === "all" ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "all" })}>All</button>
+                  </div>
+                  <div className="satellite-category-label">BY CATEGORY</div>
+                  <div className="satellite-category-list">
+                    {satelliteCategories.map((category) => <button key={category.id} className={satelliteFilter.mode === "category" && satelliteFilter.category === category.id ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "category", category: category.id })}><span>{category.icon}</span><span>{category.label}</span></button>)}
+                  </div>
+                </div>}
+              </div>}
+            </div>;
+          })}
         </div></section>
         <section className="hub-section hub-section--compact"><div className="section-label"><span>MAP</span><span>02</span></div><div className="segmented-control">{["Satellite", "Terrain"].map((mode) => <button key={mode} className={mapMode === mode ? "is-selected" : ""} onClick={() => setMapMode(mode)}>{mode}</button>)}</div></section>
         <section className="hub-section hub-section--compact"><div className="section-label"><span>VIEW</span><span>01</span></div><button className="reset-view" onClick={resetIndia}><span>Reset to India</span><span>↗</span></button></section>
         {earthquakeCount !== null && activeLayers.includes("earthquakes") && <div className="hub-live-summary"><span>INDIA REGION / EARTHQUAKES</span><strong>{earthquakeCount} EVENTS LOADED</strong></div>}
         {naturalEventCount !== null && activeLayers.includes("events") && <div className="hub-live-summary"><span>INDIA REGION / NATURAL EVENTS</span><strong>{naturalEventCount} EVENTS LOADED</strong></div>}
-        {satelliteCount !== null && activeLayers.includes("satellites") && <div className="hub-live-summary"><span>ORBITAL CATALOG / ACTIVE</span><strong>{satelliteCount} SATELLITES LOADED</strong></div>}
+        {satelliteActive && satelliteCount !== null && <div className="hub-live-summary"><span>ORBITAL CATALOG / {satelliteFilterLabel}</span><strong>{satelliteCount} DISPLAYED / {satelliteCatalogCount ?? "—"} CATALOG</strong></div>}
         <div className="hub-footer"><span>DATA SYSTEM</span><span>FOUNDATION / 01</span></div>
       </aside>
       {notice && <button className="hub-notice" onClick={() => setNotice("")}><span className="notice-dot" />{notice}<b>×</b></button>}
