@@ -1,34 +1,30 @@
 import {
   eciToGeodetic,
-  json2satrec,
   propagate,
   gstime,
+  twoline2satrec,
   type SatRec,
 } from "satellite.js";
 import { nayanDataEngine } from "../engine";
 import type { NayanDataProvider } from "../provider";
 import type { NayanSatellite, NayanSatelliteCategory } from "./types";
 
-const CELESTRAK_PROXY_URL = "/api/satellites";
+const SATNOGS_PROXY_URL = "/api/satellites";
 const EARTH_RADIUS_KM = 6378.137;
 const SATELLITE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+const TWO_PI = Math.PI * 2;
 
 export type NayanSatelliteRecord = {
   satellite: NayanSatellite;
   satrec: SatRec;
 };
 
-type CelestrakOmm = {
-  OBJECT_NAME?: string;
-  OBJECT_ID?: string;
-  EPOCH?: string;
-  MEAN_MOTION?: number;
-  ECCENTRICITY?: number;
-  INCLINATION?: number;
-  RA_OF_ASC_NODE?: number;
-  ARG_OF_PERICENTER?: number;
-  MEAN_ANOMALY?: number;
-  NORAD_CAT_ID?: number;
+type SatnogsTle = {
+  sat_id?: string;
+  norad_cat_id?: number;
+  tle0?: string;
+  tle1?: string;
+  tle2?: string;
   [key: string]: unknown;
 };
 
@@ -90,54 +86,50 @@ function classifySatellite(name: string): { category: NayanSatelliteCategory; im
   return { category: "other", important: false };
 }
 
+function julianDateToUnixMs(julianDate: number): number {
+  return (julianDate - 2440587.5) * 86400000;
+}
+
 function toNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function normalizeOmm(item: CelestrakOmm): NayanSatelliteRecord | null {
-  const noradCatalogId = toNumber(item.NORAD_CAT_ID);
-  const epoch = typeof item.EPOCH === "string" ? Date.parse(item.EPOCH) : Number.NaN;
-  const meanMotion = toNumber(item.MEAN_MOTION);
-  const eccentricity = toNumber(item.ECCENTRICITY);
-  const inclination = toNumber(item.INCLINATION);
-  const rightAscension = toNumber(item.RA_OF_ASC_NODE);
-  const argumentOfPerigee = toNumber(item.ARG_OF_PERICENTER);
-  const meanAnomaly = toNumber(item.MEAN_ANOMALY);
-
-  if (
-    noradCatalogId === null ||
-    !Number.isFinite(epoch) ||
-    meanMotion === null ||
-    eccentricity === null ||
-    inclination === null ||
-    rightAscension === null ||
-    argumentOfPerigee === null ||
-    meanAnomaly === null
-  ) return null;
+function normalizeTle(item: SatnogsTle): NayanSatelliteRecord | null {
+  const tle1 = typeof item.tle1 === "string" ? item.tle1.trimEnd() : "";
+  const tle2 = typeof item.tle2 === "string" ? item.tle2.trimEnd() : "";
+  if (!tle1 || !tle2) return null;
 
   let satrec: SatRec;
   try {
-    satrec = json2satrec(item as Parameters<typeof json2satrec>[0]);
+    satrec = twoline2satrec(tle1, tle2);
   } catch {
     return null;
   }
 
-  const name = item.OBJECT_NAME?.trim() || `NORAD ${noradCatalogId}`;
+  const noradCatalogId = toNumber(item.norad_cat_id ?? satrec.satnum);
+  if (noradCatalogId === null) return null;
+
+  const rawName = typeof item.tle0 === "string" ? item.tle0.replace(/^0\s*/, "").trim() : "";
+  const name = rawName || `NORAD ${noradCatalogId}`;
   const classification = classifySatellite(name);
+  const epoch = julianDateToUnixMs(satrec.jdsatepoch);
+  const meanMotionRevolutionsPerDay = satrec.no * 1440 / TWO_PI;
+
+  if (!Number.isFinite(epoch) || !Number.isFinite(meanMotionRevolutionsPerDay)) return null;
 
   return {
     satellite: {
       id: String(noradCatalogId),
       name,
       noradCatalogId,
-      objectId: item.OBJECT_ID?.trim() || null,
+      objectId: item.sat_id?.trim() || null,
       epoch,
-      meanMotionRevolutionsPerDay: meanMotion,
-      eccentricity,
-      inclinationDeg: inclination,
-      rightAscensionDeg: rightAscension,
-      argumentOfPerigeeDeg: argumentOfPerigee,
-      meanAnomalyDeg: meanAnomaly,
+      meanMotionRevolutionsPerDay,
+      eccentricity: satrec.ecco,
+      inclinationDeg: satrec.inclo * (180 / Math.PI),
+      rightAscensionDeg: satrec.nodeo * (180 / Math.PI),
+      argumentOfPerigeeDeg: satrec.argpo * (180 / Math.PI),
+      meanAnomalyDeg: satrec.mo * (180 / Math.PI),
       altitudeKm: 0,
       speedKmPerSecond: 0,
       latitudeDeg: 0,
@@ -150,10 +142,10 @@ function normalizeOmm(item: CelestrakOmm): NayanSatelliteRecord | null {
   };
 }
 
-export const celestrakActiveSatelliteProvider: NayanDataProvider<NayanSatelliteRecord[]> = {
-  key: "satellites.active",
+export const satnogsActiveSatelliteProvider: NayanDataProvider<NayanSatelliteRecord[]> = {
+  key: "satellites.satnogs.tle",
   async fetch(signal) {
-    const response = await fetch(CELESTRAK_PROXY_URL, {
+    const response = await fetch(SATNOGS_PROXY_URL, {
       signal,
       headers: { Accept: "application/json" },
       cache: "no-store",
@@ -170,18 +162,18 @@ export const celestrakActiveSatelliteProvider: NayanDataProvider<NayanSatelliteR
       throw new Error(message);
     }
 
-    const payload = (await response.json()) as CelestrakOmm[];
+    const payload = (await response.json()) as SatnogsTle[];
     const records = Array.isArray(payload)
-      ? payload.map(normalizeOmm).filter((record): record is NayanSatelliteRecord => record !== null)
+      ? payload.map(normalizeTle).filter((record): record is NayanSatelliteRecord => record !== null)
       : [];
 
-    if (!records.length) throw new Error("Satellite provider returned no usable active satellites");
+    if (!records.length) throw new Error("Satellite provider returned no usable TLEs");
     return records;
   },
 };
 
 export async function fetchActiveSatellites(signal?: AbortSignal): Promise<NayanSatelliteRecord[]> {
-  const result = await nayanDataEngine.get(celestrakActiveSatelliteProvider, {
+  const result = await nayanDataEngine.get(satnogsActiveSatelliteProvider, {
     cacheTtlMs: SATELLITE_CACHE_TTL_MS,
     signal,
   });
