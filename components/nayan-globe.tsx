@@ -169,23 +169,13 @@ export default function NayanGlobe() {
       try {
         const events = await fetchIndiaNaturalEvents(naturalEventAbortController.signal);
         if (cancelled || !viewer || viewer.isDestroyed()) return;
-
         for (const event of events) addNaturalEventGeometry(event);
-
-        window.dispatchEvent(
-          new CustomEvent("nayan:natural-events-loaded", {
-            detail: { count: events.length },
-          }),
-        );
+        window.dispatchEvent(new CustomEvent("nayan:natural-events-loaded", { detail: { count: events.length } }));
         viewer.scene.requestRender();
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
         console.error("NAYAN natural events layer failed:", error);
-        window.dispatchEvent(
-          new CustomEvent("nayan:natural-events-error", {
-            detail: { message: "Unable to load natural event data." },
-          }),
-        );
+        window.dispatchEvent(new CustomEvent("nayan:natural-events-error", { detail: { message: "Unable to load natural event data." } }));
       }
     };
 
@@ -203,9 +193,9 @@ export default function NayanGlobe() {
         satellitePoints = viewer.scene.primitives.add(new CesiumRef.PointPrimitiveCollection());
         satellitePointByNorad.clear();
 
-        for (const record of satelliteRecords.values()) {
-          const satellite = propagateSatellite(record, new Date());
-          if (!satellite) continue;
+        const renderSatellite = (record: NayanSatelliteRecord, date: Date) => {
+          const satellite = propagateSatellite(record, date);
+          if (!satellite) return;
           const point = satellitePoints.add({
             id: `nayan-satellite-${satellite.noradCatalogId}`,
             position: CesiumRef.Cartesian3.fromDegrees(
@@ -218,16 +208,19 @@ export default function NayanGlobe() {
             outlineColor: CesiumRef.Color.BLACK,
             outlineWidth: 1,
             disableDepthTestDistance: 0,
-            _nayanSatellite: satellite,
           });
+          point._nayanSatellite = satellite;
           satellitePointByNorad.set(satellite.noradCatalogId, point);
-        }
+        };
+
+        const now = new Date();
+        for (const record of satelliteRecords.values()) renderSatellite(record, now);
 
         const refresh = () => {
           if (!satellitePoints || !viewer || viewer.isDestroyed()) return;
-          const now = new Date();
+          const date = new Date();
           for (const record of satelliteRecords.values()) {
-            const satellite = propagateSatellite(record, now);
+            const satellite = propagateSatellite(record, date);
             const point = satellitePointByNorad.get(record.satellite.noradCatalogId);
             if (!satellite || !point) continue;
             point.position = CesiumRef.Cartesian3.fromDegrees(
@@ -246,22 +239,14 @@ export default function NayanGlobe() {
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
         console.error("NAYAN satellite layer failed:", error);
-        window.dispatchEvent(
-          new CustomEvent("nayan:satellites-error", {
-            detail: { message: "Unable to load satellite data." },
-          }),
-        );
+        window.dispatchEvent(new CustomEvent("nayan:satellites-error", { detail: { message: "Unable to load satellite data." } }));
       }
     };
 
     const flyToEarthquake = (earthquake: NayanEarthquake) => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       viewer.camera.flyTo({
-        destination: CesiumRef.Cartesian3.fromDegrees(
-          earthquake.longitude,
-          earthquake.latitude,
-          260000,
-        ),
+        destination: CesiumRef.Cartesian3.fromDegrees(earthquake.longitude, earthquake.latitude, 260000),
         orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
         duration: 1.35,
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
@@ -278,14 +263,25 @@ export default function NayanGlobe() {
       });
     };
 
-    const resetIndia = () => {
+    const flyToSatellite = (satellite: any, x: number, y: number) => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       viewer.camera.flyTo({
         destination: CesiumRef.Cartesian3.fromDegrees(
-          INDIA_CAMERA.longitude,
-          INDIA_CAMERA.latitude,
-          INDIA_CAMERA.height,
+          satellite.longitudeDeg,
+          satellite.latitudeDeg,
+          Math.max(120000, satellite.altitudeKm * 1000 + 80000),
         ),
+        orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
+        duration: 1.35,
+        easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
+      });
+      window.dispatchEvent(new CustomEvent("nayan:satellite-selected", { detail: { satellite, x, y } }));
+    };
+
+    const resetIndia = () => {
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
+      viewer.camera.flyTo({
+        destination: CesiumRef.Cartesian3.fromDegrees(INDIA_CAMERA.longitude, INDIA_CAMERA.latitude, INDIA_CAMERA.height),
         orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
         duration: 1.1,
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
@@ -301,7 +297,6 @@ export default function NayanGlobe() {
       try {
         const earthquakes = await fetchIndiaEarthquakes(earthquakeAbortController.signal);
         if (cancelled || !viewer || viewer.isDestroyed()) return;
-
         for (const earthquake of earthquakes) {
           const size = Math.max(7, Math.min(16, 4 + earthquake.magnitude * 2));
           const entity = viewer.entities.add({
@@ -324,19 +319,12 @@ export default function NayanGlobe() {
           entity._nayanEarthquake = earthquake;
           earthquakeEntities.push(entity);
         }
-
-        window.dispatchEvent(
-          new CustomEvent("nayan:earthquakes-loaded", { detail: { count: earthquakes.length } }),
-        );
+        window.dispatchEvent(new CustomEvent("nayan:earthquakes-loaded", { detail: { count: earthquakes.length } }));
         viewer.scene.requestRender();
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
         console.error("NAYAN earthquake layer failed:", error);
-        window.dispatchEvent(
-          new CustomEvent("nayan:earthquakes-error", {
-            detail: { message: "Unable to load earthquake data." },
-          }),
-        );
+        window.dispatchEvent(new CustomEvent("nayan:earthquakes-error", { detail: { message: "Unable to load earthquake data." } }));
       }
     };
 
@@ -408,9 +396,6 @@ export default function NayanGlobe() {
       scene.backgroundColor = Cesium.Color.BLACK;
       scene.skyBox.show = true;
       scene.skyAtmosphere.show = true;
-      scene.skyAtmosphere.brightnessShift = 0.02;
-      scene.skyAtmosphere.saturationShift = 0.02;
-      scene.skyAtmosphere.hueShift = 0.0;
       globe.enableLighting = true;
       globe.showGroundAtmosphere = true;
       globe.dynamicAtmosphereLighting = true;
@@ -430,46 +415,22 @@ export default function NayanGlobe() {
       viewer.screenSpaceEventHandler.setInputAction((movement: any) => {
         if (!viewer || viewer.isDestroyed()) return;
         const picked = viewer.scene.pick(movement.position);
+        const satellite = picked?.primitive?._nayanSatellite;
         const earthquake = picked?.id?._nayanEarthquake as NayanEarthquake | undefined;
         const naturalEvent = picked?.id?._nayanNaturalEvent as NayanNaturalEvent | undefined;
-        const satellite = picked?.primitive?._nayanSatellite as ReturnType<typeof propagateSatellite> | undefined;
 
         if (satellite) {
-          viewer.camera.flyTo({
-            destination: CesiumRef.Cartesian3.fromDegrees(
-              satellite.longitudeDeg,
-              satellite.latitudeDeg,
-              Math.max(120000, satellite.altitudeKm * 1000 + 80000),
-            ),
-            orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
-            duration: 1.35,
-            easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
-          });
-          window.dispatchEvent(
-            new CustomEvent("nayan:satellite-selected", {
-              detail: { satellite, x: movement.position.x, y: movement.position.y },
-            }),
-          );
+          flyToSatellite(satellite, movement.position.x, movement.position.y);
           return;
         }
-
         if (earthquake) {
           flyToEarthquake(earthquake);
-          window.dispatchEvent(
-            new CustomEvent("nayan:earthquake-selected", {
-              detail: { earthquake, x: movement.position.x, y: movement.position.y },
-            }),
-          );
+          window.dispatchEvent(new CustomEvent("nayan:earthquake-selected", { detail: { earthquake, x: movement.position.x, y: movement.position.y } }));
           return;
         }
-
         if (naturalEvent) {
           flyToNaturalEvent(naturalEvent);
-          window.dispatchEvent(
-            new CustomEvent("nayan:natural-event-selected", {
-              detail: { event: naturalEvent, x: movement.position.x, y: movement.position.y },
-            }),
-          );
+          window.dispatchEvent(new CustomEvent("nayan:natural-event-selected", { detail: { event: naturalEvent, x: movement.position.x, y: movement.position.y } }));
           return;
         }
 
@@ -488,16 +449,6 @@ export default function NayanGlobe() {
         }
       };
 
-      const onSatellitesToggle = (event: Event) => {
-        const enabled = (event as CustomEvent<boolean>).detail;
-        if (enabled) void showSatellites();
-        else {
-          satelliteAbortController?.abort();
-          clearSatellites();
-          window.dispatchEvent(new CustomEvent("nayan:satellites-cleared"));
-        }
-      };
-
       const onNaturalEventsToggle = (event: Event) => {
         const enabled = (event as CustomEvent<boolean>).detail;
         if (enabled) void showNaturalEvents();
@@ -505,6 +456,16 @@ export default function NayanGlobe() {
           naturalEventAbortController?.abort();
           clearNaturalEvents();
           window.dispatchEvent(new CustomEvent("nayan:natural-events-cleared"));
+        }
+      };
+
+      const onSatellitesToggle = (event: Event) => {
+        const enabled = (event as CustomEvent<boolean>).detail;
+        if (enabled) void showSatellites();
+        else {
+          satelliteAbortController?.abort();
+          clearSatellites();
+          window.dispatchEvent(new CustomEvent("nayan:satellites-cleared"));
         }
       };
 
