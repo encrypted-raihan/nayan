@@ -1,38 +1,64 @@
 import { NextResponse } from "next/server";
 
-const CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=JSON";
+const SATNOGS_TLE_URL = "https://db.satnogs.org/api/tle/?format=json&limit=1000";
+const CACHE_SECONDS = 60 * 60 * 2;
+const MAX_PAGES = 12;
 
-export const revalidate = 7200;
+type SatnogsTle = {
+  sat_id?: string;
+  norad_cat_id?: number;
+  tle0?: string;
+  tle1?: string;
+  tle2?: string;
+  [key: string]: unknown;
+};
+
+type SatnogsPage = SatnogsTle[] | { results?: SatnogsTle[]; next?: string | null };
+
+export const revalidate = CACHE_SECONDS;
+
+async function fetchSatnogsPage(url: string, signal: AbortSignal) {
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "NAYAN/0.1 (+https://github.com/encrypted-raihan/nayan)",
+    },
+    next: { revalidate: CACHE_SECONDS },
+    signal,
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.error(`SatNOGS DB returned ${response.status}:`, body.slice(0, 500));
+    throw new Error(`SatNOGS satellite request failed (${response.status})`);
+  }
+
+  return (await response.json()) as SatnogsPage;
+}
 
 export async function GET(request: Request) {
   try {
-    const response = await fetch(CELESTRAK_URL, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "NAYAN/0.1 (+https://github.com/encrypted-raihan/nayan)",
-      },
-      next: { revalidate: 7200 },
-      signal: request.signal,
-    });
+    const records: SatnogsTle[] = [];
+    let nextUrl: string | null = SATNOGS_TLE_URL;
 
-    if (!response.ok) {
-      const body = await response.text();
-      console.error(`CelesTrak returned ${response.status}:`, body.slice(0, 500));
+    for (let page = 0; page < MAX_PAGES && nextUrl; page += 1) {
+      const payload = await fetchSatnogsPage(nextUrl, request.signal);
+      const pageRecords = Array.isArray(payload) ? payload : payload.results ?? [];
+      records.push(...pageRecords);
+      nextUrl = Array.isArray(payload) ? null : payload.next ?? null;
+    }
+
+    if (!records.length) {
       return NextResponse.json(
-        {
-          error:
-            response.status === 403
-              ? "CelesTrak temporarily rejected the satellite request. Their service enforces a two-hour update limit; wait for the next data update rather than retrying repeatedly."
-              : `CelesTrak satellite request failed (${response.status})`,
-        },
+        { error: "SatNOGS returned no usable satellite TLE data." },
         { status: 502 },
       );
     }
 
-    const payload = await response.json();
-    return NextResponse.json(payload, {
+    return NextResponse.json(records, {
       headers: {
-        "Cache-Control": "public, s-maxage=7200, stale-while-revalidate=86400",
+        "Cache-Control": `public, s-maxage=${CACHE_SECONDS}, stale-while-revalidate=86400`,
+        "X-NAYAN-Satellite-Source": "SatNOGS DB",
       },
     });
   } catch (error) {
@@ -40,9 +66,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Satellite request aborted" }, { status: 499 });
     }
 
-    console.error("NAYAN satellite API failed:", error);
+    console.warn("NAYAN satellite API unavailable:", error);
     return NextResponse.json(
-      { error: "Unable to reach the satellite data provider." },
+      { error: "Unable to reach the SatNOGS satellite data provider." },
       { status: 502 },
     );
   }
