@@ -13,13 +13,11 @@ export class NayanDataEngine {
   ): Promise<NayanDataResult<T>> {
     const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
     const cached = this.cache.get<T>(provider.key, cacheTtlMs);
-    if (cached) {
-      return { data: cached.data, fetchedAt: cached.fetchedAt, fromCache: true };
-    }
+    if (cached) return { data: cached.data, fetchedAt: cached.fetchedAt, fromCache: true };
 
     let request = this.inFlight.get(provider.key) as Promise<NayanDataResult<T>> | undefined;
     if (!request) {
-      request = provider.fetch().then((data) => {
+      request = provider.fetch(options.signal).then((data) => {
         const entry = this.cache.set(provider.key, data);
         this.inFlight.delete(provider.key);
         return { data: entry.data, fetchedAt: entry.fetchedAt, fromCache: false };
@@ -31,7 +29,6 @@ export class NayanDataEngine {
     }
 
     if (!options.signal) return request;
-
     if (options.signal.aborted) throw new DOMException("The operation was aborted.", "AbortError");
 
     return new Promise<NayanDataResult<T>>((resolve, reject) => {
