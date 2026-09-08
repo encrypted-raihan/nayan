@@ -5,11 +5,13 @@ import {
   gstime,
   type SatRec,
 } from "satellite.js";
+import { nayanDataEngine } from "../engine";
 import type { NayanDataProvider } from "../provider";
 import type { NayanSatellite } from "./types";
 
 const CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=JSON";
 const EARTH_RADIUS_KM = 6378.137;
+const SATELLITE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 
 export type NayanSatelliteRecord = {
   satellite: NayanSatellite;
@@ -62,25 +64,26 @@ function normalizeOmm(item: CelestrakOmm): NayanSatelliteRecord | null {
     return null;
   }
 
-  const satellite: NayanSatellite = {
-    id: String(noradCatalogId),
-    name: item.OBJECT_NAME?.trim() || `NORAD ${noradCatalogId}`,
-    noradCatalogId,
-    objectId: item.OBJECT_ID?.trim() || null,
-    epoch,
-    meanMotionRevolutionsPerDay: meanMotion,
-    eccentricity,
-    inclinationDeg: inclination,
-    rightAscensionDeg: rightAscension,
-    argumentOfPerigeeDeg: argumentOfPerigee,
-    meanAnomalyDeg: meanAnomaly,
-    altitudeKm: 0,
-    speedKmPerSecond: 0,
-    latitudeDeg: 0,
-    longitudeDeg: 0,
+  return {
+    satellite: {
+      id: String(noradCatalogId),
+      name: item.OBJECT_NAME?.trim() || `NORAD ${noradCatalogId}`,
+      noradCatalogId,
+      objectId: item.OBJECT_ID?.trim() || null,
+      epoch,
+      meanMotionRevolutionsPerDay: meanMotion,
+      eccentricity,
+      inclinationDeg: inclination,
+      rightAscensionDeg: rightAscension,
+      argumentOfPerigeeDeg: argumentOfPerigee,
+      meanAnomalyDeg: meanAnomaly,
+      altitudeKm: 0,
+      speedKmPerSecond: 0,
+      latitudeDeg: 0,
+      longitudeDeg: 0,
+    },
+    satrec,
   };
-
-  return { satellite, satrec };
 }
 
 export const celestrakActiveSatelliteProvider: NayanDataProvider<NayanSatelliteRecord[]> = {
@@ -104,8 +107,16 @@ export const celestrakActiveSatelliteProvider: NayanDataProvider<NayanSatelliteR
   },
 };
 
+export async function fetchActiveSatellites(signal?: AbortSignal): Promise<NayanSatelliteRecord[]> {
+  const result = await nayanDataEngine.get(celestrakActiveSatelliteProvider, {
+    cacheTtlMs: SATELLITE_CACHE_TTL_MS,
+    signal,
+  });
+  return result.data;
+}
+
 export function propagateSatellite(record: NayanSatelliteRecord, date = new Date()): NayanSatellite | null {
-  const state = propagate(record.satrec, date, { communityDecayCheckEnabled: true });
+  const state = propagate(record.satrec, date);
   if (!state) return null;
 
   const gmst = gstime(date);
