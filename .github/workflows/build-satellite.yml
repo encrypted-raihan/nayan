@@ -17,15 +17,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Add dependency and build satellite layer
+      - name: Integrate satellite layer
         run: |
-          npm install satellite.js@7.1.0 --save
+          npm install satellite.js@6.0.2 --save
           python3 - <<'PY'
           from pathlib import Path
 
           globe = Path('components/nayan-globe.tsx')
           text = globe.read_text()
-
           text = text.replace(
             'import { fetchIndiaNaturalEvents, type NayanNaturalEvent } from "../lib/data/eonet-natural-events";',
             'import { fetchIndiaNaturalEvents, type NayanNaturalEvent } from "../lib/data/eonet-natural-events";\nimport { fetchActiveSatellites, type NayanSatelliteRecord, propagateSatellite } from "../lib/data/satellites";'
@@ -156,11 +155,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json components/nayan-globe.tsx app/explore/page.tsx lib/data/satellites
+          git add package.json package-lock.json components/nayan-globe.tsx app/explore/page.tsx
+          git diff --cached --quiet && exit 0
           git commit -m "Integrate satellite layer"
           git push
 
       - name: Remove integration workflow
+        if: success()
         run: |
           git rm .github/workflows/build-satellite.yml
           git commit -m "Remove temporary satellite integration workflow"
