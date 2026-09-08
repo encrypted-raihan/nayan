@@ -296,6 +296,9 @@ export default function NayanGlobe() {
         selectionIndicator: false,
         timeline: false,
         shouldAnimate: false,
+        scene3DOnly: true,
+        requestRenderMode: true,
+        maximumRenderTimeChange: Number.POSITIVE_INFINITY,
         terrainProvider,
       });
 
