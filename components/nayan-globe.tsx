@@ -177,7 +177,7 @@ export default function NayanGlobe() {
         viewer.scene.requestRender();
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
-        console.error("NAYAN natural events layer failed:", error);
+        console.warn("NAYAN natural events layer unavailable:", error);
         window.dispatchEvent(new CustomEvent("nayan:natural-events-error", { detail: { message: "Unable to load natural event data." } }));
       }
     };
@@ -254,7 +254,7 @@ export default function NayanGlobe() {
         satelliteRefreshTimer = window.setInterval(refresh, 1000);
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
-        console.error("NAYAN satellite layer failed:", error);
+        console.warn("NAYAN satellite layer unavailable:", error);
         window.dispatchEvent(new CustomEvent("nayan:satellites-error", { detail: { message: "Unable to load satellite data." } }));
       }
     };
@@ -343,7 +343,7 @@ export default function NayanGlobe() {
         viewer.scene.requestRender();
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
-        console.error("NAYAN earthquake layer failed:", error);
+        console.warn("NAYAN earthquake layer unavailable:", error);
         window.dispatchEvent(new CustomEvent("nayan:earthquakes-error", { detail: { message: "Unable to load earthquake data." } }));
       }
     };
@@ -513,18 +513,17 @@ export default function NayanGlobe() {
 
     let removeListeners: (() => void) | undefined;
     loadCesium().then((cleanup) => { removeListeners = cleanup; }).catch((error) => {
-      if (!cancelled) console.error("NAYAN globe failed to initialize:", error);
+      if (!cancelled) console.warn("NAYAN globe failed to initialize:", error);
     });
 
     return () => {
       cancelled = true;
       removeListeners?.();
-      earthquakeAbortController?.abort();
-      naturalEventAbortController?.abort();
-      satelliteAbortController?.abort();
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
+      viewer = null;
+      CesiumRef = null;
     };
   }, []);
 
-  return <div ref={containerRef} className="nayan-globe" aria-label="NAYAN 3D globe" />;
+  return <div ref={containerRef} className="nayan-globe" aria-label="NAYAN 3D Earth visualization" />;
 }
