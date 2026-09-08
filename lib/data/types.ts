@@ -43,4 +43,4 @@ export type NayanNaturalEvent = {
   sourceUrl: string;
 };
 
-export type NayanDataKey = "earthquakes" | "natural-events";
+export type NayanDataKey = "earthquakes" | "natural-events" | "satellites";
