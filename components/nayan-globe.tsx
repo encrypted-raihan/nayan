@@ -48,6 +48,7 @@ export default function NayanGlobe() {
     let naturalEventEntities: any[] = [];
     let satellitePoints: any = null;
     let satelliteRecords = new Map<number, NayanSatelliteRecord>();
+    let satellitePointByNorad = new Map<number, any>();
     let satelliteRefreshTimer: number | null = null;
     let satelliteAbortController: AbortController | null = null;
     let earthquakeAbortController: AbortController | null = null;
@@ -62,9 +63,16 @@ export default function NayanGlobe() {
 
     const clearSatellites = () => {
       if (!viewer || viewer.isDestroyed()) return;
-      if (satelliteRefreshTimer !== null) { window.clearInterval(satelliteRefreshTimer); satelliteRefreshTimer = null; }
-      if (satellitePoints) { viewer.scene.primitives.remove(satellitePoints); satellitePoints = null; }
+      if (satelliteRefreshTimer !== null) {
+        window.clearInterval(satelliteRefreshTimer);
+        satelliteRefreshTimer = null;
+      }
+      if (satellitePoints) {
+        viewer.scene.primitives.remove(satellitePoints);
+        satellitePoints = null;
+      }
       satelliteRecords.clear();
+      satellitePointByNorad.clear();
       viewer.scene.requestRender();
     };
 
@@ -181,8 +189,6 @@ export default function NayanGlobe() {
       }
     };
 
-
-
     const showSatellites = async () => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       clearSatellites();
@@ -195,42 +201,67 @@ export default function NayanGlobe() {
 
         satelliteRecords = new Map(records.map((record) => [record.satellite.noradCatalogId, record]));
         satellitePoints = viewer.scene.primitives.add(new CesiumRef.PointPrimitiveCollection());
+        satellitePointByNorad.clear();
+
+        for (const record of satelliteRecords.values()) {
+          const satellite = propagateSatellite(record, new Date());
+          if (!satellite) continue;
+          const point = satellitePoints.add({
+            id: `nayan-satellite-${satellite.noradCatalogId}`,
+            position: CesiumRef.Cartesian3.fromDegrees(
+              satellite.longitudeDeg,
+              satellite.latitudeDeg,
+              satellite.altitudeKm * 1000,
+            ),
+            pixelSize: 6,
+            color: CesiumRef.Color.WHITE,
+            outlineColor: CesiumRef.Color.BLACK,
+            outlineWidth: 1,
+            disableDepthTestDistance: 0,
+            _nayanSatellite: satellite,
+          });
+          satellitePointByNorad.set(satellite.noradCatalogId, point);
+        }
 
         const refresh = () => {
           if (!satellitePoints || !viewer || viewer.isDestroyed()) return;
-          satellitePoints.removeAll();
           const now = new Date();
           for (const record of satelliteRecords.values()) {
             const satellite = propagateSatellite(record, now);
-            if (!satellite) continue;
-            satellitePoints.add({
-              id: `nayan-satellite-${satellite.noradCatalogId}`,
-              position: CesiumRef.Cartesian3.fromDegrees(satellite.longitudeDeg, satellite.latitudeDeg, satellite.altitudeKm * 1000),
-              pixelSize: 6,
-              color: CesiumRef.Color.WHITE,
-              outlineColor: CesiumRef.Color.BLACK,
-              outlineWidth: 1,
-              disableDepthTestDistance: 0,
-              _nayanSatellite: satellite,
-            });
+            const point = satellitePointByNorad.get(record.satellite.noradCatalogId);
+            if (!satellite || !point) continue;
+            point.position = CesiumRef.Cartesian3.fromDegrees(
+              satellite.longitudeDeg,
+              satellite.latitudeDeg,
+              satellite.altitudeKm * 1000,
+            );
+            point._nayanSatellite = satellite;
           }
           viewer.scene.requestRender();
         };
 
-        refresh();
         satelliteRefreshTimer = window.setInterval(refresh, 1000);
         window.dispatchEvent(new CustomEvent("nayan:satellites-loaded", { detail: { count: records.length } }));
+        viewer.scene.requestRender();
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
         console.error("NAYAN satellite layer failed:", error);
-        window.dispatchEvent(new CustomEvent("nayan:satellites-error", { detail: { message: "Unable to load satellite data." } }));
+        window.dispatchEvent(
+          new CustomEvent("nayan:satellites-error", {
+            detail: { message: "Unable to load satellite data." },
+          }),
+        );
       }
     };
 
     const flyToEarthquake = (earthquake: NayanEarthquake) => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       viewer.camera.flyTo({
-        destination: CesiumRef.Cartesian3.fromDegrees(earthquake.longitude, earthquake.latitude, 260000),
+        destination: CesiumRef.Cartesian3.fromDegrees(
+          earthquake.longitude,
+          earthquake.latitude,
+          260000,
+        ),
         orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
         duration: 1.35,
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
@@ -250,7 +281,11 @@ export default function NayanGlobe() {
     const resetIndia = () => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       viewer.camera.flyTo({
-        destination: CesiumRef.Cartesian3.fromDegrees(INDIA_CAMERA.longitude, INDIA_CAMERA.latitude, INDIA_CAMERA.height),
+        destination: CesiumRef.Cartesian3.fromDegrees(
+          INDIA_CAMERA.longitude,
+          INDIA_CAMERA.latitude,
+          INDIA_CAMERA.height,
+        ),
         orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
         duration: 1.1,
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
@@ -290,12 +325,18 @@ export default function NayanGlobe() {
           earthquakeEntities.push(entity);
         }
 
-        window.dispatchEvent(new CustomEvent("nayan:earthquakes-loaded", { detail: { count: earthquakes.length } }));
+        window.dispatchEvent(
+          new CustomEvent("nayan:earthquakes-loaded", { detail: { count: earthquakes.length } }),
+        );
         viewer.scene.requestRender();
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
         console.error("NAYAN earthquake layer failed:", error);
-        window.dispatchEvent(new CustomEvent("nayan:earthquakes-error", { detail: { message: "Unable to load earthquake data." } }));
+        window.dispatchEvent(
+          new CustomEvent("nayan:earthquakes-error", {
+            detail: { message: "Unable to load earthquake data." },
+          }),
+        );
       }
     };
 
@@ -395,29 +436,46 @@ export default function NayanGlobe() {
 
         if (satellite) {
           viewer.camera.flyTo({
-            destination: CesiumRef.Cartesian3.fromDegrees(satellite.longitudeDeg, satellite.latitudeDeg, Math.max(120000, satellite.altitudeKm * 1000 + 80000)),
+            destination: CesiumRef.Cartesian3.fromDegrees(
+              satellite.longitudeDeg,
+              satellite.latitudeDeg,
+              Math.max(120000, satellite.altitudeKm * 1000 + 80000),
+            ),
             orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
             duration: 1.35,
             easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
           });
-          window.dispatchEvent(new CustomEvent("nayan:satellite-selected", { detail: { satellite, x: movement.position.x, y: movement.position.y } }));
+          window.dispatchEvent(
+            new CustomEvent("nayan:satellite-selected", {
+              detail: { satellite, x: movement.position.x, y: movement.position.y },
+            }),
+          );
           return;
         }
 
         if (earthquake) {
           flyToEarthquake(earthquake);
-          window.dispatchEvent(new CustomEvent("nayan:earthquake-selected", { detail: { earthquake, x: movement.position.x, y: movement.position.y } }));
+          window.dispatchEvent(
+            new CustomEvent("nayan:earthquake-selected", {
+              detail: { earthquake, x: movement.position.x, y: movement.position.y },
+            }),
+          );
           return;
         }
 
         if (naturalEvent) {
           flyToNaturalEvent(naturalEvent);
-          window.dispatchEvent(new CustomEvent("nayan:natural-event-selected", { detail: { event: naturalEvent, x: movement.position.x, y: movement.position.y } }));
+          window.dispatchEvent(
+            new CustomEvent("nayan:natural-event-selected", {
+              detail: { event: naturalEvent, x: movement.position.x, y: movement.position.y },
+            }),
+          );
           return;
         }
 
         window.dispatchEvent(new CustomEvent("nayan:earthquake-deselected"));
         window.dispatchEvent(new CustomEvent("nayan:natural-event-deselected"));
+        window.dispatchEvent(new CustomEvent("nayan:satellite-deselected"));
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
       const onEarthquakeToggle = (event: Event) => {
@@ -445,8 +503,6 @@ export default function NayanGlobe() {
         if (enabled) void showNaturalEvents();
         else {
           naturalEventAbortController?.abort();
-        satelliteAbortController?.abort();
-        clearSatellites();
           clearNaturalEvents();
           window.dispatchEvent(new CustomEvent("nayan:natural-events-cleared"));
         }
@@ -481,6 +537,7 @@ export default function NayanGlobe() {
       removeListeners?.();
       earthquakeAbortController?.abort();
       naturalEventAbortController?.abort();
+      satelliteAbortController?.abort();
       if (viewer && !viewer.isDestroyed()) viewer.destroy();
     };
   }, []);
