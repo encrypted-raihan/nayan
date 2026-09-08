@@ -29,7 +29,7 @@ async function fetchSatnogsPage(url: string, signal: AbortSignal) {
 
   if (!response.ok) {
     const body = await response.text();
-    console.error(`SatNOGS DB returned ${response.status}:`, body.slice(0, 500));
+    console.warn(`SatNOGS DB returned ${response.status}:`, body.slice(0, 500));
     throw new Error(`SatNOGS satellite request failed (${response.status})`);
   }
 
@@ -45,7 +45,11 @@ export async function GET(request: Request) {
       const payload = await fetchSatnogsPage(nextUrl, request.signal);
       const pageRecords = Array.isArray(payload) ? payload : payload.results ?? [];
       records.push(...pageRecords);
-      nextUrl = Array.isArray(payload) ? null : payload.next ?? null;
+      nextUrl = Array.isArray(payload)
+        ? null
+        : payload.next
+          ? new URL(payload.next, SATNOGS_TLE_URL).toString()
+          : null;
     }
 
     if (!records.length) {
