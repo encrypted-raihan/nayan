@@ -1,3 +1,13 @@
+export type NayanSatelliteCategory =
+  | "navigation"
+  | "weather"
+  | "earth-observation"
+  | "communications"
+  | "science"
+  | "education"
+  | "defense"
+  | "other";
+
 export type NayanSatellite = {
   id: string;
   name: string;
@@ -14,4 +24,7 @@ export type NayanSatellite = {
   speedKmPerSecond: number;
   latitudeDeg: number;
   longitudeDeg: number;
+  category: NayanSatelliteCategory;
+  categoryLabel: string;
+  important: boolean;
 };
