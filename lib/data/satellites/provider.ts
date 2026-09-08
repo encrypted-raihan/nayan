@@ -9,7 +9,7 @@ import { nayanDataEngine } from "../engine";
 import type { NayanDataProvider } from "../provider";
 import type { NayanSatellite, NayanSatelliteCategory } from "./types";
 
-const CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=JSON";
+const CELESTRAK_PROXY_URL = "/api/satellites";
 const EARTH_RADIUS_KM = 6378.137;
 const SATELLITE_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
 
@@ -153,20 +153,29 @@ function normalizeOmm(item: CelestrakOmm): NayanSatelliteRecord | null {
 export const celestrakActiveSatelliteProvider: NayanDataProvider<NayanSatelliteRecord[]> = {
   key: "satellites.active",
   async fetch(signal) {
-    const response = await fetch(CELESTRAK_URL, {
+    const response = await fetch(CELESTRAK_PROXY_URL, {
       signal,
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
 
-    if (!response.ok) throw new Error(`CelesTrak satellite request failed (${response.status})`);
+    if (!response.ok) {
+      let message = `Satellite data service failed (${response.status})`;
+      try {
+        const body = (await response.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        // Keep the status-based message when the API response is not JSON.
+      }
+      throw new Error(message);
+    }
 
     const payload = (await response.json()) as CelestrakOmm[];
     const records = Array.isArray(payload)
       ? payload.map(normalizeOmm).filter((record): record is NayanSatelliteRecord => record !== null)
       : [];
 
-    if (!records.length) throw new Error("CelesTrak returned no usable active satellites");
+    if (!records.length) throw new Error("Satellite provider returned no usable active satellites");
     return records;
   },
 };
