@@ -33,9 +33,7 @@ export default function NayanGlobe() {
 
     const clearEarthquakes = () => {
       if (!viewer || viewer.isDestroyed()) return;
-      for (const entity of earthquakeEntities) {
-        viewer.entities.remove(entity);
-      }
+      for (const entity of earthquakeEntities) viewer.entities.remove(entity);
       earthquakeEntities = [];
       viewer.scene.requestRender();
     };
@@ -93,9 +91,30 @@ export default function NayanGlobe() {
       }
     };
 
+    const flyToEarthquake = (earthquake: NayanEarthquake) => {
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
+
+      const destination = CesiumRef.Cartesian3.fromDegrees(
+        earthquake.longitude,
+        earthquake.latitude,
+        260000,
+      );
+
+      viewer.camera.flyTo({
+        destination,
+        orientation: {
+          heading: 0,
+          pitch: CesiumRef.Math.toRadians(-90),
+          roll: 0,
+        },
+        duration: 1.35,
+        easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
+      });
+    };
+
     const resetIndia = () => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
-      viewer.camera.setView({
+      viewer.camera.flyTo({
         destination: CesiumRef.Cartesian3.fromDegrees(
           INDIA_CAMERA.longitude,
           INDIA_CAMERA.latitude,
@@ -106,9 +125,9 @@ export default function NayanGlobe() {
           pitch: CesiumRef.Math.toRadians(-90),
           roll: 0,
         },
+        duration: 1.1,
+        easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
       });
-      viewer.camera.lookAtTransform(CesiumRef.Matrix4.IDENTITY);
-      viewer.scene.requestRender();
     };
 
     const loadCesium = async () => {
@@ -154,18 +173,11 @@ export default function NayanGlobe() {
       CesiumRef = Cesium;
 
       const ionToken = process.env.NEXT_PUBLIC_CESIUM_ION_TOKEN;
-      if (ionToken && Cesium.Ion) {
-        Cesium.Ion.defaultAccessToken = ionToken;
-      }
+      if (ionToken && Cesium.Ion) Cesium.Ion.defaultAccessToken = ionToken;
 
       const [imageryProvider, terrainProvider] = await Promise.all([
-        Cesium.createWorldImageryAsync({
-          style: Cesium.IonWorldImageryStyle.AERIAL,
-        }),
-        Cesium.createWorldTerrainAsync({
-          requestVertexNormals: true,
-          requestWaterMask: true,
-        }),
+        Cesium.createWorldImageryAsync({ style: Cesium.IonWorldImageryStyle.AERIAL }),
+        Cesium.createWorldTerrainAsync({ requestVertexNormals: true, requestWaterMask: true }),
       ]);
 
       if (cancelled || !containerRef.current) return;
@@ -222,6 +234,7 @@ export default function NayanGlobe() {
         const earthquake = picked?.id?._nayanEarthquake as NayanEarthquake | undefined;
 
         if (earthquake) {
+          flyToEarthquake(earthquake);
           window.dispatchEvent(
             new CustomEvent("nayan:earthquake-selected", {
               detail: {
@@ -269,9 +282,7 @@ export default function NayanGlobe() {
         removeListeners = cleanup;
       })
       .catch((error) => {
-        if (!cancelled) {
-          console.error("NAYAN globe failed to initialize:", error);
-        }
+        if (!cancelled) console.error("NAYAN globe failed to initialize:", error);
       });
 
     return () => {
@@ -282,11 +293,5 @@ export default function NayanGlobe() {
     };
   }, []);
 
-  return (
-    <div
-      ref={containerRef}
-      className="nayan-globe"
-      aria-label="NAYAN 3D globe"
-    />
-  );
+  return <div ref={containerRef} className="nayan-globe" aria-label="NAYAN 3D globe" />;
 }
