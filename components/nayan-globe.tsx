@@ -22,6 +22,20 @@ const INDIA_CAMERA = {
   height: 6500000,
 };
 
+const NATURAL_EVENT_EMOJI: Record<NayanNaturalEvent["category"], string> = {
+  storm: "🌪️",
+  wildfire: "🔥",
+  volcano: "🌋",
+  flood: "🌧️",
+  landslide: "🏔️",
+  dust: "💨",
+  ice: "❄️",
+  other: "⚠️",
+};
+
+const getNaturalEventEmoji = (event: NayanNaturalEvent) =>
+  NATURAL_EVENT_EMOJI[event.category] ?? NATURAL_EVENT_EMOJI.other;
+
 export default function NayanGlobe() {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -49,29 +63,21 @@ export default function NayanGlobe() {
     };
 
     const addNaturalEventPoint = (event: NayanNaturalEvent) => {
-      const categorySize: Record<string, number> = {
-        storm: 11,
-        wildfire: 10,
-        volcano: 11,
-        flood: 9,
-        landslide: 9,
-        dust: 9,
-        ice: 9,
-        other: 8,
-      };
-
       const entity = viewer.entities.add({
         id: `nayan-natural-event-${event.id}-point`,
         name: event.title,
         position: CesiumRef.Cartesian3.fromDegrees(event.longitude, event.latitude, 0),
-        point: {
-          pixelSize: categorySize[event.category] ?? 9,
-          color: CesiumRef.Color.WHITE,
-          outlineColor: CesiumRef.Color.fromAlpha(CesiumRef.Color.BLACK, 0.85),
-          outlineWidth: 2,
+        label: {
+          text: getNaturalEventEmoji(event),
+          font: '30px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif',
+          style: CesiumRef.LabelStyle.FILL,
+          verticalOrigin: CesiumRef.VerticalOrigin.CENTER,
+          horizontalOrigin: CesiumRef.HorizontalOrigin.CENTER,
           heightReference: CesiumRef.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: 0,
-          scaleByDistance: new CesiumRef.NearFarScalar(500000, 1.1, 18000000, 0.65),
+          scaleByDistance: new CesiumRef.NearFarScalar(500000, 1.15, 18000000, 0.7),
+          translucencyByDistance: new CesiumRef.NearFarScalar(500000, 1.0, 18000000, 0.82),
+          showBackground: false,
         },
       });
       entity._nayanNaturalEvent = event;
@@ -208,14 +214,17 @@ export default function NayanGlobe() {
             id: `nayan-earthquake-${earthquake.id}`,
             name: `Magnitude ${earthquake.magnitude.toFixed(1)} earthquake`,
             position: CesiumRef.Cartesian3.fromDegrees(earthquake.longitude, earthquake.latitude, 0),
-            point: {
-              pixelSize: size,
-              color: CesiumRef.Color.WHITE,
-              outlineColor: CesiumRef.Color.fromAlpha(CesiumRef.Color.BLACK, 0.85),
-              outlineWidth: 2,
+            label: {
+              text: "💥",
+              font: `30px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`,
+              style: CesiumRef.LabelStyle.FILL,
+              verticalOrigin: CesiumRef.VerticalOrigin.CENTER,
+              horizontalOrigin: CesiumRef.HorizontalOrigin.CENTER,
               heightReference: CesiumRef.HeightReference.CLAMP_TO_GROUND,
               disableDepthTestDistance: 0,
-              scaleByDistance: new CesiumRef.NearFarScalar(500000, 1.15, 18000000, 0.7),
+              scale: Math.max(0.72, Math.min(1.25, size / 12)),
+              scaleByDistance: new CesiumRef.NearFarScalar(500000, 1.05, 18000000, 0.68),
+              showBackground: false,
             },
           });
           entity._nayanEarthquake = earthquake;
