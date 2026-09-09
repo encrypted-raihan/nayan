@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { fetchIndiaAircraft, type NayanAircraft } from "../lib/data/aircraft";
+import { fetchIndiaAircraft, type NayanAircraft, AIRCRAFT_REFRESH_MS } from "../lib/data/aircraft";
 import { fetchIndiaEarthquakes, type NayanEarthquake } from "../lib/data/usgs-earthquakes";
 import { fetchIndiaNaturalEvents, type NayanNaturalEvent } from "../lib/data/eonet-natural-events";
 import { fetchActiveSatellites, type NayanSatelliteRecord, propagateSatellite } from "../lib/data/satellites";
@@ -366,7 +366,7 @@ export default function NayanGlobe() {
       if (!aircraftPoints) aircraftPoints = viewer.scene.primitives.add(new CesiumRef.BillboardCollection());
 
       const seenIds = new Set<string>();
-      for (const aircraft of aircraftList) addOrUpdateAircraft(aircraft, 1200, seenIds);
+      for (const aircraft of aircraftList) addOrUpdateAircraft(aircraft, Math.min(AIRCRAFT_REFRESH_MS - 1000, 5000), seenIds);
 
       for (const [icao24, visual] of aircraftVisuals) {
         if (seenIds.has(icao24)) continue;
@@ -392,13 +392,28 @@ export default function NayanGlobe() {
         } catch (error) {
           if ((error as Error)?.name === "AbortError") return;
           console.warn("NAYAN aircraft layer unavailable:", error);
-          window.dispatchEvent(new CustomEvent("nayan:aircraft-error", { detail: { message: "Unable to load aircraft data." } }));
+          window.dispatchEvent(new CustomEvent("nayan:aircraft-error", { detail: { message: "Aircraft provider unavailable — keeping the last valid snapshot." } }));
         }
       };
 
       await refresh();
       if (cancelled || !viewer || viewer.isDestroyed()) return;
-      aircraftPollTimer = window.setInterval(() => void refresh(), 15000);
+      aircraftPollTimer = window.setInterval(() => void refresh(), AIRCRAFT_REFRESH_MS);
+    };
+
+    const flyToAircraft = (aircraft: NayanAircraft, x: number, y: number) => {
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
+      viewer.camera.flyTo({
+        destination: CesiumRef.Cartesian3.fromDegrees(
+          aircraft.longitude,
+          aircraft.latitude,
+          Math.max(30000, Math.min(250000, (aircraft.altitudeMeters ?? 1000) + 50000)),
+        ),
+        orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
+        duration: 1.2,
+        easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
+      });
+      window.dispatchEvent(new CustomEvent("nayan:aircraft-selected", { detail: { aircraft, x, y } }));
     };
 
     const flyToEarthquake = (earthquake: NayanEarthquake) => {
@@ -434,21 +449,6 @@ export default function NayanGlobe() {
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
       });
       window.dispatchEvent(new CustomEvent("nayan:satellite-selected", { detail: { satellite, x, y } }));
-    };
-
-    const flyToAircraft = (aircraft: NayanAircraft, x: number, y: number) => {
-      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
-      viewer.camera.flyTo({
-        destination: CesiumRef.Cartesian3.fromDegrees(
-          aircraft.longitude,
-          aircraft.latitude,
-          Math.max(90000, (aircraft.altitudeMeters ?? 0) + 70000),
-        ),
-        orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
-        duration: 1.2,
-        easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
-      });
-      window.dispatchEvent(new CustomEvent("nayan:aircraft-selected", { detail: { aircraft, x, y } }));
     };
 
     const resetIndia = () => {
@@ -612,6 +612,16 @@ export default function NayanGlobe() {
         window.dispatchEvent(new CustomEvent("nayan:satellite-deselected"));
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
+      const onAircraftToggle = (event: Event) => {
+        const enabled = (event as CustomEvent<boolean>).detail;
+        if (enabled) void showAircraft();
+        else {
+          aircraftAbortController?.abort();
+          clearAircraft();
+          window.dispatchEvent(new CustomEvent("nayan:aircraft-cleared"));
+        }
+      };
+
       const onEarthquakeToggle = (event: Event) => {
         const enabled = (event as CustomEvent<boolean>).detail;
         if (enabled) void showEarthquakes();
@@ -644,33 +654,25 @@ export default function NayanGlobe() {
         }
       };
 
-      const onAircraftToggle = (event: Event) => {
-        const enabled = (event as CustomEvent<boolean>).detail;
-        if (enabled) void showAircraft();
-        else {
-          clearAircraft();
-          window.dispatchEvent(new CustomEvent("nayan:aircraft-cleared"));
-        }
-      };
-
       const onSatelliteFilter = (event: Event) => {
-        applySatelliteFilter((event as CustomEvent<SatelliteFilter>).detail);
+        satelliteFilter = (event as CustomEvent<SatelliteFilter>).detail;
+        if (satelliteRecords.size) renderSatellites();
       };
 
       const onResetIndia = () => resetIndia();
+      window.addEventListener("nayan:aircraft-toggle", onAircraftToggle);
       window.addEventListener("nayan:earthquakes-toggle", onEarthquakeToggle);
       window.addEventListener("nayan:natural-events-toggle", onNaturalEventsToggle);
       window.addEventListener("nayan:satellites-toggle", onSatellitesToggle);
-      window.addEventListener("nayan:aircraft-toggle", onAircraftToggle);
       window.addEventListener("nayan:satellite-filter", onSatelliteFilter);
       window.addEventListener("nayan:reset-india", onResetIndia);
       viewer.scene.requestRender();
 
       return () => {
+        window.removeEventListener("nayan:aircraft-toggle", onAircraftToggle);
         window.removeEventListener("nayan:earthquakes-toggle", onEarthquakeToggle);
         window.removeEventListener("nayan:natural-events-toggle", onNaturalEventsToggle);
         window.removeEventListener("nayan:satellites-toggle", onSatellitesToggle);
-        window.removeEventListener("nayan:aircraft-toggle", onAircraftToggle);
         window.removeEventListener("nayan:satellite-filter", onSatelliteFilter);
         window.removeEventListener("nayan:reset-india", onResetIndia);
         earthquakeAbortController?.abort();
