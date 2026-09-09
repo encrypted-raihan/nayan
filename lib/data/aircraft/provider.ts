@@ -1,6 +1,7 @@
 import { nayanDataEngine } from "../engine";
 import type { NayanDataProvider } from "../provider";
 import {
+  AIRCRAFT_CACHE_SECONDS,
   AIRCRAFT_QUERY_CENTERS,
   AIRCRAFT_QUERY_RADIUS_NM,
   AIRCRAFT_REGION,
@@ -27,15 +28,8 @@ type AdsbAircraft = {
   seen_pos?: number | null;
 };
 
-type AdsbResponse = {
-  ac?: AdsbAircraft[];
-  now?: number;
-  total?: number;
-  msg?: string;
-};
-
 const AIRCRAFT_PROXY_URL = "/api/aircraft";
-const AIRCRAFT_CACHE_TTL_MS = 15_000;
+const AIRCRAFT_CACHE_TTL_MS = AIRCRAFT_CACHE_SECONDS * 1000;
 const KNOTS_TO_METERS_PER_SECOND = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const FEET_PER_MINUTE_TO_METERS_PER_SECOND = FEET_TO_METERS / 60;
@@ -88,7 +82,7 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
     : null;
 
   const seenSeconds = Math.max(0, finiteNumber(item.seen_pos) ?? finiteNumber(item.seen) ?? 0);
-  const lastSeen = (seenAt - seenSeconds * 1000);
+  const lastSeen = seenAt - seenSeconds * 1000;
   const rawCategory = textOrNull(item.category);
 
   return {
