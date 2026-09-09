@@ -5,6 +5,7 @@ import {
   AIRCRAFT_QUERY_CENTERS,
   AIRCRAFT_QUERY_RADIUS_NM,
   AIRCRAFT_REGION,
+  AIRCRAFT_REFRESH_MS,
 } from "./config";
 import type { AircraftCategory, NayanAircraft } from "./types";
 
@@ -68,17 +69,20 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
   const aircraftType = textOrNull(item.t);
   const callsign = textOrNull(item.flight);
   const registration = textOrNull(item.r);
+  const altitudeRaw = finiteNumber(item.alt_baro);
   const altitudeMeters = item.alt_baro === "ground" || item.on_ground
     ? null
-    : finiteNumber(item.alt_baro) !== null
-      ? finiteNumber(item.alt_baro)! * FEET_TO_METERS
+    : altitudeRaw !== null
+      ? altitudeRaw * FEET_TO_METERS
       : null;
-  const groundSpeedMetersPerSecond = finiteNumber(item.gs) !== null
-    ? finiteNumber(item.gs)! * KNOTS_TO_METERS_PER_SECOND
+  const groundSpeedRaw = finiteNumber(item.gs);
+  const groundSpeedMetersPerSecond = groundSpeedRaw !== null
+    ? groundSpeedRaw * KNOTS_TO_METERS_PER_SECOND
     : null;
   const headingDeg = finiteNumber(item.true_heading) ?? finiteNumber(item.track);
-  const verticalRateMetersPerSecond = finiteNumber(item.baro_rate) !== null
-    ? finiteNumber(item.baro_rate)! * FEET_PER_MINUTE_TO_METERS_PER_SECOND
+  const verticalRateRaw = finiteNumber(item.baro_rate);
+  const verticalRateMetersPerSecond = verticalRateRaw !== null
+    ? verticalRateRaw * FEET_PER_MINUTE_TO_METERS_PER_SECOND
     : null;
 
   const seenSeconds = Math.max(0, finiteNumber(item.seen_pos) ?? finiteNumber(item.seen) ?? 0);
@@ -150,7 +154,7 @@ export const adsbLolAircraftProvider: NayanDataProvider<NayanAircraft[]> = {
 
 export async function fetchIndiaAircraft(signal?: AbortSignal): Promise<NayanAircraft[]> {
   const result = await nayanDataEngine.get(adsbLolAircraftProvider, {
-    cacheTtlMs: AIRCRAFT_CACHE_TTL_MS,
+    cacheTtlMs: Math.max(AIRCRAFT_CACHE_TTL_MS, AIRCRAFT_REFRESH_MS),
     signal,
   });
   return result.data;
