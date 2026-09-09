@@ -2,14 +2,12 @@ import { NextResponse } from "next/server";
 import {
   AIRCRAFT_CACHE_SECONDS,
   AIRCRAFT_QUERY_CENTERS,
-  AIRCRAFT_QUERY_DELAY_MS,
   AIRCRAFT_QUERY_RADIUS_NM,
   AIRCRAFT_STALE_SECONDS,
 } from "../../../lib/data/aircraft/config";
 
 const ADSB_LOL_BASE = "https://api.adsb.lol/v2/lat";
 const RATE_LIMIT_BACKOFF_MS = 10_000;
-const EMPTY_RETRY_DELAY_MS = 2_000;
 
 type AdsbAircraft = Record<string, unknown>;
 type AdsbResponse = {
@@ -17,6 +15,11 @@ type AdsbResponse = {
   now?: number;
   msg?: string;
   total?: number;
+};
+
+type RegionalSnapshot = {
+  aircraft: AdsbAircraft[];
+  fetchedAt: number;
 };
 
 type AircraftPayload = {
@@ -28,28 +31,22 @@ type AircraftPayload = {
   failedQueries: number;
   complete: boolean;
   stale: boolean;
+  updatedCenter: string | null;
 };
 
-let cachedSnapshot: AircraftPayload | null = null;
-let cacheExpiresAt = 0;
+// Instead of waiting 30–60 seconds to scan the whole country, NAYAN collects
+// one priority region per request and accumulates the successful snapshots.
+// This makes the Aircraft toggle feel immediate while still building broad
+// coverage over several polling cycles.
+const regionalSnapshots = new Map<string, RegionalSnapshot>();
+let nextCenterIndex = 0;
 let refreshInFlight: Promise<AircraftPayload> | null = null;
+let lastRateLimitedAt = 0;
 
 export const revalidate = AIRCRAFT_CACHE_SECONDS;
 
 function aircraftUrl(lat: number, lon: number) {
   return `${ADSB_LOL_BASE}/${lat.toFixed(4)}/lon/${lon.toFixed(4)}/dist/${AIRCRAFT_QUERY_RADIUS_NM}`;
-}
-
-function sleep(ms: number, signal: AbortSignal) {
-  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 async function fetchRegion(
@@ -80,80 +77,77 @@ async function fetchRegion(
   }
 }
 
-async function refreshSnapshot(signal: AbortSignal): Promise<AircraftPayload> {
-  const records: AdsbAircraft[] = [];
-  let successfulQueries = 0;
-  let failedQueries = 0;
-  let throttled = false;
-
-  // Walk the grid slowly and stop treating 429 as something to immediately retry.
-  // The goal is steady coverage, not request bursts.
-  for (let index = 0; index < AIRCRAFT_QUERY_CENTERS.length; index += 1) {
-    const center = AIRCRAFT_QUERY_CENTERS[index];
-    const result = await fetchRegion(center, signal);
-
-    if (result.payload && Array.isArray(result.payload.ac)) {
-      records.push(...result.payload.ac);
-      successfulQueries += 1;
-    } else {
-      failedQueries += 1;
-      if (result.status === 420 || result.status === 429) {
-        throttled = true;
-        await sleep(RATE_LIMIT_BACKOFF_MS, signal);
-        break;
-      }
-    }
-
-    if (index < AIRCRAFT_QUERY_CENTERS.length - 1) {
-      await sleep(throttled ? RATE_LIMIT_BACKOFF_MS : AIRCRAFT_QUERY_DELAY_MS, signal);
-    }
-  }
-
-  if (successfulQueries === 0) {
-    throw new Error("No ADSB.lol aircraft grid cells succeeded");
-  }
-
+function buildMergedSnapshot(updatedCenter: string | null, stale = false): AircraftPayload {
   const deduped = new Map<string, AdsbAircraft>();
-  for (const aircraft of records) {
-    const hex = typeof aircraft.hex === "string" ? aircraft.hex.trim().toLowerCase() : "";
-    if (!hex) continue;
-    deduped.set(hex, aircraft);
+  let latestFetchedAt = 0;
+
+  for (const snapshot of regionalSnapshots.values()) {
+    latestFetchedAt = Math.max(latestFetchedAt, snapshot.fetchedAt);
+    for (const aircraft of snapshot.aircraft) {
+      const hex = typeof aircraft.hex === "string" ? aircraft.hex.trim().toLowerCase() : "";
+      if (!hex) continue;
+      deduped.set(hex, aircraft);
+    }
   }
 
-  const fetchedAt = Date.now();
-  const snapshot: AircraftPayload = {
+  return {
     aircraft: [...deduped.values()],
-    fetchedAt,
+    fetchedAt: latestFetchedAt || Date.now(),
     source: "adsb.lol",
     queryCenters: AIRCRAFT_QUERY_CENTERS.length,
-    successfulQueries,
-    failedQueries,
-    complete: successfulQueries === AIRCRAFT_QUERY_CENTERS.length,
-    stale: false,
+    successfulQueries: regionalSnapshots.size,
+    failedQueries: Math.max(0, AIRCRAFT_QUERY_CENTERS.length - regionalSnapshots.size),
+    complete: regionalSnapshots.size === AIRCRAFT_QUERY_CENTERS.length,
+    stale,
+    updatedCenter,
   };
+}
 
-  cachedSnapshot = snapshot;
-  cacheExpiresAt = fetchedAt + AIRCRAFT_CACHE_SECONDS * 1000;
-  return snapshot;
+async function refreshOneRegion(signal: AbortSignal): Promise<AircraftPayload> {
+  const center = AIRCRAFT_QUERY_CENTERS[nextCenterIndex];
+  nextCenterIndex = (nextCenterIndex + 1) % AIRCRAFT_QUERY_CENTERS.length;
+
+  const result = await fetchRegion(center, signal);
+
+  if (result.payload && Array.isArray(result.payload.ac)) {
+    regionalSnapshots.set(center.label, {
+      aircraft: result.payload.ac,
+      fetchedAt: Date.now(),
+    });
+    lastRateLimitedAt = 0;
+    return buildMergedSnapshot(center.label, false);
+  }
+
+  if (result.status === 420 || result.status === 429) {
+    lastRateLimitedAt = Date.now();
+    console.warn(`ADSB.lol throttled the ${center.label} region; keeping accumulated aircraft data.`);
+  }
+
+  if (regionalSnapshots.size > 0) {
+    return buildMergedSnapshot(center.label, true);
+  }
+
+  throw new Error(`ADSB.lol ${center.label} region unavailable (${result.status ?? "network error"})`);
 }
 
 async function getSnapshot(signal: AbortSignal): Promise<AircraftPayload> {
-  const now = Date.now();
-
-  if (cachedSnapshot && now < cacheExpiresAt) return cachedSnapshot;
   if (refreshInFlight) return refreshInFlight;
 
-  refreshInFlight = refreshSnapshot(signal).finally(() => {
+  const now = Date.now();
+  if (lastRateLimitedAt && now - lastRateLimitedAt < RATE_LIMIT_BACKOFF_MS) {
+    if (regionalSnapshots.size > 0) return buildMergedSnapshot(null, true);
+  }
+
+  refreshInFlight = refreshOneRegion(signal).finally(() => {
     refreshInFlight = null;
   });
 
   try {
     return await refreshInFlight;
   } catch (error) {
-    const ageMs = cachedSnapshot ? now - cachedSnapshot.fetchedAt : Number.POSITIVE_INFINITY;
-    if (cachedSnapshot && ageMs <= AIRCRAFT_STALE_SECONDS * 1000) {
-      console.warn(`Using aircraft snapshot from ${Math.round(ageMs / 1000)}s ago after upstream failure.`);
-      return { ...cachedSnapshot, stale: true };
+    const snapshot = buildMergedSnapshot(null, true);
+    if (regionalSnapshots.size > 0 && Date.now() - snapshot.fetchedAt <= AIRCRAFT_STALE_SECONDS * 1000) {
+      return snapshot;
     }
     throw error;
   }
@@ -162,7 +156,7 @@ async function getSnapshot(signal: AbortSignal): Promise<AircraftPayload> {
 export async function GET(request: Request) {
   try {
     const payload = await getSnapshot(request.signal);
-    const ageMs = Date.now() - payload.fetchedAt;
+    const ageMs = Math.max(0, Date.now() - payload.fetchedAt);
 
     return NextResponse.json(
       { ...payload, ageMs },
@@ -172,6 +166,7 @@ export async function GET(request: Request) {
           "X-NAYAN-Aircraft-Source": "ADSB.lol",
           "X-NAYAN-Aircraft-Stale": String(payload.stale),
           "X-NAYAN-Aircraft-Complete": String(payload.complete),
+          "X-NAYAN-Aircraft-Updated-Center": payload.updatedCenter ?? "none",
         },
       },
     );
@@ -182,7 +177,7 @@ export async function GET(request: Request) {
 
     console.warn("NAYAN aircraft API unavailable:", error);
     return NextResponse.json(
-      { error: "Unable to reach the ADSB.lol aircraft data provider." },
+      { error: "Unable to reach the ADSB.lol aircraft data provider yet." },
       { status: 502 },
     );
   }
