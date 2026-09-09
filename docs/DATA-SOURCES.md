@@ -2,7 +2,7 @@
 
 ## Aircraft
 
-NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snapshots. The API is available to everyone and its public data/API are licensed under **ODbL 1.0**. ADSB.lol also states that its API rate limits are dynamic based on environment load, so NAYAN deliberately keeps its initial aircraft collector conservative. citeturn0search0turn0search5
+NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snapshots. The API is available to everyone and its public data/API are licensed under **ODbL 1.0**. ADSB.lol also states that its API rate limits are dynamic based on environment load, so NAYAN deliberately keeps its initial aircraft collector conservative.
 
 ### Initial collection strategy
 
