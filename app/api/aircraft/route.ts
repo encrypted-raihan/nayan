@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import {
   AIRCRAFT_CACHE_SECONDS,
   AIRCRAFT_QUERY_CENTERS,
+  AIRCRAFT_QUERY_DELAY_MS,
   AIRCRAFT_QUERY_RADIUS_NM,
   AIRCRAFT_STALE_SECONDS,
 } from "../../../lib/data/aircraft/config";
 
 const ADSB_LOL_BASE = "https://api.adsb.lol/v2/lat";
-const RETRY_AFTER_MS = 1_500;
 
 type AircraftPayload = {
   aircraft: unknown[];
@@ -15,6 +15,7 @@ type AircraftPayload = {
   source: "adsb.lol";
   queryCenters: number;
   successfulQueries: number;
+  failedQueries: number;
   stale: boolean;
 };
 
@@ -32,12 +33,19 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchRegion(center: { lat: number; lon: number }, signal: AbortSignal) {
-  const url = aircraftUrl(center.lat, center.lon);
-  let lastStatus = 0;
+type AdsbResponse = {
+  ac?: unknown[];
+  now?: number;
+  msg?: string;
+  total?: number;
+};
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetch(url, {
+async function fetchRegion(
+  center: { lat: number; lon: number; label: string },
+  signal: AbortSignal,
+): Promise<AdsbResponse | null> {
+  try {
+    const response = await fetch(aircraftUrl(center.lat, center.lon), {
       headers: {
         Accept: "application/json",
         "User-Agent": "NAYAN/0.1 (+https://github.com/encrypted-raihan/nayan)",
@@ -46,45 +54,58 @@ async function fetchRegion(center: { lat: number; lon: number }, signal: AbortSi
       signal,
     });
 
-    if (response.ok) {
-      return (await response.json()) as {
-        ac?: unknown[];
-        now?: number;
-        msg?: string;
-        total?: number;
-      };
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(
+        `ADSB.lol ${center.label} returned ${response.status}:`,
+        body.slice(0, 300),
+      );
+      return null;
     }
 
-    lastStatus = response.status;
-    const body = await response.text();
-    console.warn(
-      `ADSB.lol returned ${response.status} for ${center.lat},${center.lon}:`,
-      body.slice(0, 300),
-    );
-
-    if ((response.status === 420 || response.status === 429) && attempt === 0) {
-      await sleep(RETRY_AFTER_MS);
-      continue;
-    }
-
-    break;
+    return (await response.json()) as AdsbResponse;
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") throw error;
+    console.warn(`ADSB.lol ${center.label} query failed:`, error);
+    return null;
   }
-
-  throw new Error(`ADSB.lol request failed (${lastStatus})`);
 }
 
 async function refreshSnapshot(signal: AbortSignal): Promise<AircraftPayload> {
-  const center = AIRCRAFT_QUERY_CENTERS[0];
-  const payload = await fetchRegion(center, signal);
-  const aircraft = Array.isArray(payload.ac) ? payload.ac : [];
-  const fetchedAt = Date.now();
+  const records: unknown[] = [];
+  let successfulQueries = 0;
+  let failedQueries = 0;
 
+  for (let index = 0; index < AIRCRAFT_QUERY_CENTERS.length; index += 1) {
+    const center = AIRCRAFT_QUERY_CENTERS[index];
+    const payload = await fetchRegion(center, signal);
+
+    if (payload && Array.isArray(payload.ac)) {
+      records.push(...payload.ac);
+      successfulQueries += 1;
+    } else {
+      failedQueries += 1;
+    }
+
+    // Keep a deliberate gap between upstream requests. This is a collector,
+    // not a fan-out: one region finishes before the next begins.
+    if (index < AIRCRAFT_QUERY_CENTERS.length - 1) {
+      await sleep(AIRCRAFT_QUERY_DELAY_MS);
+    }
+  }
+
+  if (successfulQueries === 0) {
+    throw new Error("All ADSB.lol aircraft grid queries failed");
+  }
+
+  const fetchedAt = Date.now();
   const snapshot: AircraftPayload = {
-    aircraft,
+    aircraft: records,
     fetchedAt,
     source: "adsb.lol",
-    queryCenters: 1,
-    successfulQueries: 1,
+    queryCenters: AIRCRAFT_QUERY_CENTERS.length,
+    successfulQueries,
+    failedQueries,
     stale: false,
   };
 
@@ -111,7 +132,7 @@ async function getSnapshot(signal: AbortSignal): Promise<AircraftPayload> {
   } catch (error) {
     const ageMs = cachedSnapshot ? now - cachedSnapshot.fetchedAt : Number.POSITIVE_INFINITY;
     if (cachedSnapshot && ageMs <= AIRCRAFT_STALE_SECONDS * 1000) {
-      console.warn(`Using ADSB.lol snapshot from ${Math.round(ageMs / 1000)}s ago after upstream failure.`);
+      console.warn(`Using aircraft snapshot from ${Math.round(ageMs / 1000)}s ago after grid refresh failure.`);
       return { ...cachedSnapshot, stale: true };
     }
     throw error;
@@ -124,10 +145,7 @@ export async function GET(request: Request) {
     const ageMs = Date.now() - payload.fetchedAt;
 
     return NextResponse.json(
-      {
-        ...payload,
-        ageMs,
-      },
+      { ...payload, ageMs },
       {
         headers: {
           "Cache-Control": `public, s-maxage=${AIRCRAFT_CACHE_SECONDS}, stale-while-revalidate=${AIRCRAFT_STALE_SECONDS}`,
