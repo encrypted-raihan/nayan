@@ -1,10 +1,19 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { fetchIndiaAircraft, type NayanAircraft } from "../lib/data/aircraft";
 import { fetchIndiaEarthquakes, type NayanEarthquake } from "../lib/data/usgs-earthquakes";
 import { fetchIndiaNaturalEvents, type NayanNaturalEvent } from "../lib/data/eonet-natural-events";
 import { fetchActiveSatellites, type NayanSatelliteRecord, propagateSatellite } from "../lib/data/satellites";
 import type { NayanSatellite, NayanSatelliteCategory } from "../lib/data/satellites";
+
+const AIRCRAFT_GLYPH = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <g fill="white" stroke="#111" stroke-width="2" stroke-linejoin="round">
+    <path d="M23 3h2l3 17 13 5v3l-13-2-2 10 7 5v3l-9-3-9 3v-3l7-5-2-10-13 2v-3l13-5z"/>
+  </g>
+</svg>`)} `;
+const AIRCRAFT_GLYPH_URL = AIRCRAFT_GLYPH.trim();
 
 declare global {
   interface Window {
@@ -41,6 +50,13 @@ const getNaturalEventEmoji = (event: NayanNaturalEvent) =>
 type SatelliteFilterMode = "important" | "all" | "category";
 type SatelliteFilter = { mode: SatelliteFilterMode; category?: NayanSatelliteCategory };
 
+type AircraftVisual = {
+  aircraft: NayanAircraft;
+  billboard: any;
+  position: any;
+  targetPosition: any;
+};
+
 export default function NayanGlobe() {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -57,6 +73,11 @@ export default function NayanGlobe() {
     let satelliteAbortController: AbortController | null = null;
     let earthquakeAbortController: AbortController | null = null;
     let naturalEventAbortController: AbortController | null = null;
+    let aircraftAbortController: AbortController | null = null;
+    let aircraftPoints: any = null;
+    let aircraftVisuals = new Map<string, AircraftVisual>();
+    let aircraftAnimationFrame: number | null = null;
+    let aircraftPollTimer: number | null = null;
     let satelliteFilter: SatelliteFilter = { mode: "important" };
 
     const clearEarthquakes = () => {
@@ -85,6 +106,25 @@ export default function NayanGlobe() {
       if (!viewer || viewer.isDestroyed()) return;
       for (const entity of naturalEventEntities) viewer.entities.remove(entity);
       naturalEventEntities = [];
+      viewer.scene.requestRender();
+    };
+
+    const clearAircraft = () => {
+      if (!viewer || viewer.isDestroyed()) return;
+      if (aircraftPollTimer !== null) {
+        window.clearInterval(aircraftPollTimer);
+        aircraftPollTimer = null;
+      }
+      aircraftAbortController?.abort();
+      if (aircraftAnimationFrame !== null) {
+        window.cancelAnimationFrame(aircraftAnimationFrame);
+        aircraftAnimationFrame = null;
+      }
+      if (aircraftPoints) {
+        viewer.scene.primitives.remove(aircraftPoints);
+        aircraftPoints = null;
+      }
+      aircraftVisuals.clear();
       viewer.scene.requestRender();
     };
 
@@ -264,6 +304,103 @@ export default function NayanGlobe() {
       if (satelliteRecords.size) renderSatellites();
     };
 
+    const addOrUpdateAircraft = (aircraft: NayanAircraft, durationMs: number, seenIds: Set<string>) => {
+      if (!aircraftPoints || !CesiumRef) return;
+      const target = CesiumRef.Cartesian3.fromDegrees(
+        aircraft.longitude,
+        aircraft.latitude,
+        Math.max(80, aircraft.altitudeMeters ?? 80),
+      );
+      const existing = aircraftVisuals.get(aircraft.icao24);
+
+      if (!existing) {
+        const billboard = aircraftPoints.add({
+          id: `nayan-aircraft-${aircraft.icao24}`,
+          image: AIRCRAFT_GLYPH_URL,
+          position: target,
+          width: 24,
+          height: 24,
+          rotation: aircraft.headingDeg !== null ? CesiumRef.Math.toRadians(-aircraft.headingDeg) : 0,
+          alignedAxis: CesiumRef.Cartesian3.UNIT_Z,
+          verticalOrigin: CesiumRef.VerticalOrigin.CENTER,
+          horizontalOrigin: CesiumRef.HorizontalOrigin.CENTER,
+          disableDepthTestDistance: 0,
+          translucencyByDistance: new CesiumRef.NearFarScalar(100000, 1.0, 12000000, 0.58),
+          scaleByDistance: new CesiumRef.NearFarScalar(100000, 1.0, 20000000, 0.68),
+        });
+        billboard._nayanAircraft = aircraft;
+        aircraftVisuals.set(aircraft.icao24, {
+          aircraft,
+          billboard,
+          position: CesiumRef.Cartesian3.clone(target),
+          targetPosition: CesiumRef.Cartesian3.clone(target),
+        });
+        seenIds.add(aircraft.icao24);
+        return;
+      }
+
+      existing.aircraft = aircraft;
+      existing.billboard._nayanAircraft = aircraft;
+      existing.billboard.rotation = aircraft.headingDeg !== null ? CesiumRef.Math.toRadians(-aircraft.headingDeg) : existing.billboard.rotation;
+      existing.targetPosition = target;
+      seenIds.add(aircraft.icao24);
+
+      const start = CesiumRef.Cartesian3.clone(existing.position);
+      const startTime = performance.now();
+      const animate = (time: number) => {
+        if (cancelled || !viewer || viewer.isDestroyed() || !aircraftPoints) return;
+        const progress = Math.min(1, (time - startTime) / durationMs);
+        const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        CesiumRef.Cartesian3.lerp(start, existing.targetPosition, eased, existing.position);
+        existing.billboard.position = existing.position;
+        viewer.scene.requestRender();
+        if (progress < 1) aircraftAnimationFrame = window.requestAnimationFrame(animate);
+        else aircraftAnimationFrame = null;
+      };
+      if (aircraftAnimationFrame !== null) window.cancelAnimationFrame(aircraftAnimationFrame);
+      aircraftAnimationFrame = window.requestAnimationFrame(animate);
+    };
+
+    const renderAircraftSnapshot = (aircraftList: NayanAircraft[]) => {
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
+      if (!aircraftPoints) aircraftPoints = viewer.scene.primitives.add(new CesiumRef.BillboardCollection());
+
+      const seenIds = new Set<string>();
+      for (const aircraft of aircraftList) addOrUpdateAircraft(aircraft, 1200, seenIds);
+
+      for (const [icao24, visual] of aircraftVisuals) {
+        if (seenIds.has(icao24)) continue;
+        aircraftPoints.remove(visual.billboard);
+        aircraftVisuals.delete(icao24);
+      }
+
+      window.dispatchEvent(new CustomEvent("nayan:aircraft-loaded", { detail: { count: aircraftVisuals.size } }));
+      viewer.scene.requestRender();
+    };
+
+    const showAircraft = async () => {
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
+      clearAircraft();
+      aircraftAbortController = new AbortController();
+
+      const refresh = async () => {
+        if (cancelled || !viewer || viewer.isDestroyed()) return;
+        try {
+          const aircraft = await fetchIndiaAircraft(aircraftAbortController?.signal);
+          if (cancelled || !viewer || viewer.isDestroyed()) return;
+          renderAircraftSnapshot(aircraft);
+        } catch (error) {
+          if ((error as Error)?.name === "AbortError") return;
+          console.warn("NAYAN aircraft layer unavailable:", error);
+          window.dispatchEvent(new CustomEvent("nayan:aircraft-error", { detail: { message: "Unable to load aircraft data." } }));
+        }
+      };
+
+      await refresh();
+      if (cancelled || !viewer || viewer.isDestroyed()) return;
+      aircraftPollTimer = window.setInterval(() => void refresh(), 15000);
+    };
+
     const flyToEarthquake = (earthquake: NayanEarthquake) => {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       viewer.camera.flyTo({
@@ -297,6 +434,21 @@ export default function NayanGlobe() {
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
       });
       window.dispatchEvent(new CustomEvent("nayan:satellite-selected", { detail: { satellite, x, y } }));
+    };
+
+    const flyToAircraft = (aircraft: NayanAircraft, x: number, y: number) => {
+      if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
+      viewer.camera.flyTo({
+        destination: CesiumRef.Cartesian3.fromDegrees(
+          aircraft.longitude,
+          aircraft.latitude,
+          Math.max(90000, (aircraft.altitudeMeters ?? 0) + 70000),
+        ),
+        orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
+        duration: 1.2,
+        easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
+      });
+      window.dispatchEvent(new CustomEvent("nayan:aircraft-selected", { detail: { aircraft, x, y } }));
     };
 
     const resetIndia = () => {
@@ -432,9 +584,14 @@ export default function NayanGlobe() {
       viewer.screenSpaceEventHandler.setInputAction((movement: any) => {
         if (!viewer || viewer.isDestroyed()) return;
         const picked = viewer.scene.pick(movement.position);
+        const aircraft = picked?.primitive?._nayanAircraft as NayanAircraft | undefined;
         const satellite = picked?.primitive?._nayanSatellite as NayanSatellite | undefined;
         const earthquake = picked?.id?._nayanEarthquake as NayanEarthquake | undefined;
         const naturalEvent = picked?.id?._nayanNaturalEvent as NayanNaturalEvent | undefined;
+        if (aircraft) {
+          flyToAircraft(aircraft, movement.position.x, movement.position.y);
+          return;
+        }
         if (satellite) {
           flyToSatellite(satellite, movement.position.x, movement.position.y);
           return;
@@ -449,6 +606,7 @@ export default function NayanGlobe() {
           window.dispatchEvent(new CustomEvent("nayan:natural-event-selected", { detail: { event: naturalEvent, x: movement.position.x, y: movement.position.y } }));
           return;
         }
+        window.dispatchEvent(new CustomEvent("nayan:aircraft-deselected"));
         window.dispatchEvent(new CustomEvent("nayan:earthquake-deselected"));
         window.dispatchEvent(new CustomEvent("nayan:natural-event-deselected"));
         window.dispatchEvent(new CustomEvent("nayan:satellite-deselected"));
@@ -486,6 +644,15 @@ export default function NayanGlobe() {
         }
       };
 
+      const onAircraftToggle = (event: Event) => {
+        const enabled = (event as CustomEvent<boolean>).detail;
+        if (enabled) void showAircraft();
+        else {
+          clearAircraft();
+          window.dispatchEvent(new CustomEvent("nayan:aircraft-cleared"));
+        }
+      };
+
       const onSatelliteFilter = (event: Event) => {
         applySatelliteFilter((event as CustomEvent<SatelliteFilter>).detail);
       };
@@ -494,6 +661,7 @@ export default function NayanGlobe() {
       window.addEventListener("nayan:earthquakes-toggle", onEarthquakeToggle);
       window.addEventListener("nayan:natural-events-toggle", onNaturalEventsToggle);
       window.addEventListener("nayan:satellites-toggle", onSatellitesToggle);
+      window.addEventListener("nayan:aircraft-toggle", onAircraftToggle);
       window.addEventListener("nayan:satellite-filter", onSatelliteFilter);
       window.addEventListener("nayan:reset-india", onResetIndia);
       viewer.scene.requestRender();
@@ -502,11 +670,13 @@ export default function NayanGlobe() {
         window.removeEventListener("nayan:earthquakes-toggle", onEarthquakeToggle);
         window.removeEventListener("nayan:natural-events-toggle", onNaturalEventsToggle);
         window.removeEventListener("nayan:satellites-toggle", onSatellitesToggle);
+        window.removeEventListener("nayan:aircraft-toggle", onAircraftToggle);
         window.removeEventListener("nayan:satellite-filter", onSatelliteFilter);
         window.removeEventListener("nayan:reset-india", onResetIndia);
         earthquakeAbortController?.abort();
         naturalEventAbortController?.abort();
         satelliteAbortController?.abort();
+        clearAircraft();
         clearSatellites();
       };
     };
