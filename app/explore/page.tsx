@@ -2,23 +2,24 @@
 
 import { useEffect, useState } from "react";
 import NayanGlobe from "../../components/nayan-globe";
+import type { NayanAircraft } from "../../lib/data/aircraft";
 import type { NayanEarthquake } from "../../lib/data/usgs-earthquakes";
 import type { NayanNaturalEvent } from "../../lib/data/eonet-natural-events";
 import type { NayanSatellite, NayanSatelliteCategory } from "../../lib/data/satellites";
 
 type Layer = { id: string; label: string; detail: string; status: "demo" | "live"; icon: string };
+type AircraftSelection = { aircraft: NayanAircraft; x: number; y: number };
 type EarthquakeSelection = { earthquake: NayanEarthquake; x: number; y: number };
 type NaturalEventSelection = { event: NayanNaturalEvent; x: number; y: number };
 type SatelliteSelection = { satellite: NayanSatellite; x: number; y: number };
 type SatelliteFilterMode = "important" | "all" | "category";
-
 type SatelliteFilter = { mode: SatelliteFilterMode; category?: NayanSatelliteCategory };
 
 const layers: Layer[] = [
   { id: "earthquakes", label: "Earthquakes", detail: "INDIA + SURROUNDING REGION", status: "live", icon: "🌋" },
   { id: "events", label: "Natural Events", detail: "INDIA + SURROUNDING REGION", status: "live", icon: "🌪️" },
   { id: "satellites", label: "Satellites", detail: "ACTIVE ORBITAL OBJECTS", status: "live", icon: "🛰️" },
-  { id: "aircraft", label: "Aircraft", detail: "LIVE FLIGHT TRAFFIC", status: "demo", icon: "✈️" },
+  { id: "aircraft", label: "Aircraft", detail: "LIVE FLIGHT TRAFFIC", status: "live", icon: "✈️" },
   { id: "ships", label: "Ships", detail: "MARITIME TRAFFIC", status: "demo", icon: "🚢" },
 ];
 
@@ -41,28 +42,37 @@ function formatNaturalCategory(event: NayanNaturalEvent) {
   return event.categoryLabel.toUpperCase();
 }
 
+function formatAircraftNumber(value: number | null, digits = 0, suffix = "") {
+  return value === null || !Number.isFinite(value) ? "—" : `${value.toFixed(digits)}${suffix}`;
+}
+
 export default function ExplorePage() {
   const [open, setOpen] = useState(false);
   const [activeLayers, setActiveLayers] = useState<string[]>([]);
   const [mapMode, setMapMode] = useState("Satellite");
   const [notice, setNotice] = useState("");
+  const [selectedAircraft, setSelectedAircraft] = useState<AircraftSelection | null>(null);
   const [selectedEarthquake, setSelectedEarthquake] = useState<EarthquakeSelection | null>(null);
   const [selectedNaturalEvent, setSelectedNaturalEvent] = useState<NaturalEventSelection | null>(null);
+  const [selectedSatellite, setSelectedSatellite] = useState<SatelliteSelection | null>(null);
+  const [aircraftCount, setAircraftCount] = useState<number | null>(null);
   const [earthquakeCount, setEarthquakeCount] = useState<number | null>(null);
   const [naturalEventCount, setNaturalEventCount] = useState<number | null>(null);
-  const [selectedSatellite, setSelectedSatellite] = useState<SatelliteSelection | null>(null);
   const [satelliteCount, setSatelliteCount] = useState<number | null>(null);
   const [satelliteCatalogCount, setSatelliteCatalogCount] = useState<number | null>(null);
   const [satelliteFilter, setSatelliteFilter] = useState<SatelliteFilter>({ mode: "important" });
   const [satelliteControlsOpen, setSatelliteControlsOpen] = useState(false);
 
   useEffect(() => {
-    const onEarthquakeSelected = (event: Event) => { setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedEarthquake((event as CustomEvent<EarthquakeSelection>).detail); };
-    const onNaturalEventSelected = (event: Event) => { setSelectedEarthquake(null); setSelectedSatellite(null); setSelectedNaturalEvent((event as CustomEvent<NaturalEventSelection>).detail); };
-    const onSatelliteSelected = (event: Event) => { setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite((event as CustomEvent<SatelliteSelection>).detail); };
+    const onAircraftSelected = (event: Event) => { setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedAircraft((event as CustomEvent<AircraftSelection>).detail); };
+    const onEarthquakeSelected = (event: Event) => { setSelectedAircraft(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedEarthquake((event as CustomEvent<EarthquakeSelection>).detail); };
+    const onNaturalEventSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedSatellite(null); setSelectedNaturalEvent((event as CustomEvent<NaturalEventSelection>).detail); };
+    const onSatelliteSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite((event as CustomEvent<SatelliteSelection>).detail); };
+    const onAircraftDeselected = () => setSelectedAircraft(null);
     const onEarthquakeDeselected = () => setSelectedEarthquake(null);
     const onNaturalEventDeselected = () => setSelectedNaturalEvent(null);
     const onSatelliteDeselected = () => setSelectedSatellite(null);
+    const onAircraftLoaded = (event: Event) => { setAircraftCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Aircraft layer updated"); };
     const onEarthquakeLoaded = (event: Event) => { setEarthquakeCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Earthquake layer updated"); };
     const onNaturalEventsLoaded = (event: Event) => { setNaturalEventCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Natural events layer updated"); };
     const onSatellitesFiltered = (event: Event) => {
@@ -70,40 +80,51 @@ export default function ExplorePage() {
       setSatelliteCount(detail.count);
       setSatelliteCatalogCount(detail.catalogCount);
     };
+    const onAircraftCleared = () => { setSelectedAircraft(null); setAircraftCount(null); };
     const onEarthquakesCleared = () => setSelectedEarthquake(null);
     const onNaturalEventsCleared = () => setSelectedNaturalEvent(null);
     const onSatellitesCleared = () => { setSelectedSatellite(null); setSatelliteCount(null); };
     const onError = (event: Event) => setNotice((event as CustomEvent<{ message: string }>).detail.message);
 
+    window.addEventListener("nayan:aircraft-selected", onAircraftSelected);
     window.addEventListener("nayan:earthquake-selected", onEarthquakeSelected);
     window.addEventListener("nayan:natural-event-selected", onNaturalEventSelected);
     window.addEventListener("nayan:satellite-selected", onSatelliteSelected);
+    window.addEventListener("nayan:aircraft-deselected", onAircraftDeselected);
     window.addEventListener("nayan:earthquake-deselected", onEarthquakeDeselected);
     window.addEventListener("nayan:natural-event-deselected", onNaturalEventDeselected);
     window.addEventListener("nayan:satellite-deselected", onSatelliteDeselected);
+    window.addEventListener("nayan:aircraft-loaded", onAircraftLoaded);
     window.addEventListener("nayan:earthquakes-loaded", onEarthquakeLoaded);
     window.addEventListener("nayan:natural-events-loaded", onNaturalEventsLoaded);
     window.addEventListener("nayan:satellites-filtered", onSatellitesFiltered);
+    window.addEventListener("nayan:aircraft-cleared", onAircraftCleared);
     window.addEventListener("nayan:earthquakes-cleared", onEarthquakesCleared);
     window.addEventListener("nayan:natural-events-cleared", onNaturalEventsCleared);
     window.addEventListener("nayan:satellites-cleared", onSatellitesCleared);
+    window.addEventListener("nayan:aircraft-error", onError);
     window.addEventListener("nayan:earthquakes-error", onError);
     window.addEventListener("nayan:natural-events-error", onError);
     window.addEventListener("nayan:satellites-error", onError);
 
     return () => {
+      window.removeEventListener("nayan:aircraft-selected", onAircraftSelected);
       window.removeEventListener("nayan:earthquake-selected", onEarthquakeSelected);
       window.removeEventListener("nayan:natural-event-selected", onNaturalEventSelected);
       window.removeEventListener("nayan:satellite-selected", onSatelliteSelected);
+      window.removeEventListener("nayan:aircraft-deselected", onAircraftDeselected);
       window.removeEventListener("nayan:earthquake-deselected", onEarthquakeDeselected);
       window.removeEventListener("nayan:natural-event-deselected", onNaturalEventDeselected);
       window.removeEventListener("nayan:satellite-deselected", onSatelliteDeselected);
+      window.removeEventListener("nayan:aircraft-loaded", onAircraftLoaded);
       window.removeEventListener("nayan:earthquakes-loaded", onEarthquakeLoaded);
       window.removeEventListener("nayan:natural-events-loaded", onNaturalEventsLoaded);
       window.removeEventListener("nayan:satellites-filtered", onSatellitesFiltered);
+      window.removeEventListener("nayan:aircraft-cleared", onAircraftCleared);
       window.removeEventListener("nayan:earthquakes-cleared", onEarthquakesCleared);
       window.removeEventListener("nayan:natural-events-cleared", onNaturalEventsCleared);
       window.removeEventListener("nayan:satellites-cleared", onSatellitesCleared);
+      window.removeEventListener("nayan:aircraft-error", onError);
       window.removeEventListener("nayan:earthquakes-error", onError);
       window.removeEventListener("nayan:natural-events-error", onError);
       window.removeEventListener("nayan:satellites-error", onError);
@@ -111,16 +132,20 @@ export default function ExplorePage() {
   }, []);
 
   const toggleLayer = (id: string) => {
-    if (!["earthquakes", "events", "satellites"].includes(id)) {
+    if (!["aircraft", "earthquakes", "events", "satellites"].includes(id)) {
       setNotice("Demo control — this layer will become live when its data provider is connected.");
       return;
     }
     const enabling = !activeLayers.includes(id);
     setActiveLayers((current) => enabling ? [...current, id] : current.filter((item) => item !== id));
+    setSelectedAircraft(null);
     setSelectedEarthquake(null);
     setSelectedNaturalEvent(null);
     setSelectedSatellite(null);
-    window.dispatchEvent(new CustomEvent(id === "earthquakes" ? "nayan:earthquakes-toggle" : id === "events" ? "nayan:natural-events-toggle" : "nayan:satellites-toggle", { detail: enabling }));
+    window.dispatchEvent(new CustomEvent(
+      id === "aircraft" ? "nayan:aircraft-toggle" : id === "earthquakes" ? "nayan:earthquakes-toggle" : id === "events" ? "nayan:natural-events-toggle" : "nayan:satellites-toggle",
+      { detail: enabling },
+    ));
   };
 
   const chooseSatelliteFilter = (filter: SatelliteFilter) => {
@@ -131,6 +156,7 @@ export default function ExplorePage() {
 
   const resetIndia = () => {
     window.dispatchEvent(new CustomEvent("nayan:reset-india"));
+    setSelectedAircraft(null);
     setSelectedEarthquake(null);
     setSelectedNaturalEvent(null);
     setSelectedSatellite(null);
@@ -147,13 +173,22 @@ export default function ExplorePage() {
       <div className="explore-corner explore-corner--left"><span>01</span><span className="corner-line" /><span>EXPLORE</span></div>
       <div className="explore-corner explore-corner--right"><span>INDIA REGION</span><span className="corner-line" /><span>3D</span></div>
 
+      {selectedAircraft && <aside className="earthquake-detail earthquake-detail--anchored" style={{ left: selectedAircraft.x > window.innerWidth / 2 ? Math.max(16, selectedAircraft.x - 356) : Math.min(Math.max(16, window.innerWidth - 356), selectedAircraft.x + 18), top: selectedAircraft.y > window.innerHeight / 2 ? Math.max(16, selectedAircraft.y - 320) : Math.min(Math.max(16, window.innerHeight - 320), selectedAircraft.y + 18), right: "auto", bottom: "auto", transform: "none", width: "min(340px, calc(100vw - 32px))" }}>
+        <div className="earthquake-detail-top"><div><span className="hub-eyebrow">NAYAN / AIRCRAFT</span><div className="earthquake-magnitude">✈️</div></div><button className="earthquake-detail-close" onClick={() => setSelectedAircraft(null)} aria-label="Close aircraft details">×</button></div>
+        <div className="earthquake-place">{selectedAircraft.aircraft.callsign ?? selectedAircraft.aircraft.icao24.toUpperCase()}</div>
+        <div className="earthquake-meta-grid"><div><span>ICAO24</span><strong>{selectedAircraft.aircraft.icao24.toUpperCase()}</strong></div><div><span>REGISTRATION</span><strong>{selectedAircraft.aircraft.registration ?? "—"}</strong></div><div><span>TYPE</span><strong>{selectedAircraft.aircraft.aircraftType ?? "—"}</strong></div><div><span>CATEGORY</span><strong>{selectedAircraft.aircraft.category.replaceAll("-", " ").toUpperCase()}</strong></div></div>
+        <div className="earthquake-meta-grid"><div><span>ALTITUDE</span><strong>{formatAircraftNumber(selectedAircraft.aircraft.altitudeMeters !== null ? selectedAircraft.aircraft.altitudeMeters / 1000 : null, 1, " KM")}</strong></div><div><span>SPEED</span><strong>{formatAircraftNumber(selectedAircraft.aircraft.groundSpeedMetersPerSecond, 1, " M/S")}</strong></div><div><span>HEADING</span><strong>{formatAircraftNumber(selectedAircraft.aircraft.headingDeg, 0, "°")}</strong></div><div><span>VERTICAL</span><strong>{formatAircraftNumber(selectedAircraft.aircraft.verticalRateMetersPerSecond, 1, " M/S")}</strong></div></div>
+        <div className="earthquake-meta-grid"><div><span>STATUS</span><strong>{selectedAircraft.aircraft.onGround ? "ON GROUND" : "AIRBORNE"}</strong></div><div><span>SQUAWK</span><strong>{selectedAircraft.aircraft.squawk ?? "—"}</strong></div><div><span>SEEN</span><strong>{formatUtc(selectedAircraft.aircraft.lastSeen)}</strong></div></div>
+        <a className="earthquake-source" href="https://adsb.lol" target="_blank" rel="noreferrer">OPEN ADSB.LOL <span>↗</span></a>
+      </aside>}
+
       {selectedSatellite && <aside className="earthquake-detail earthquake-detail--anchored" style={{ left: selectedSatellite.x > window.innerWidth / 2 ? Math.max(16, selectedSatellite.x - 356) : Math.min(Math.max(16, window.innerWidth - 356), selectedSatellite.x + 18), top: selectedSatellite.y > window.innerHeight / 2 ? Math.max(16, selectedSatellite.y - 292) : Math.min(Math.max(16, window.innerHeight - 292), selectedSatellite.y + 18), right: "auto", bottom: "auto", transform: "none", width: "min(340px, calc(100vw - 32px))" }}>
         <div className="earthquake-detail-top"><div><span className="hub-eyebrow">NAYAN / SATELLITE</span><div className="earthquake-magnitude">🛰️</div></div><button className="earthquake-detail-close" onClick={() => setSelectedSatellite(null)} aria-label="Close satellite details">×</button></div>
         <div className="earthquake-place">{selectedSatellite.satellite.name}</div>
         <div className="earthquake-meta-grid"><div><span>NORAD</span><strong>{selectedSatellite.satellite.noradCatalogId}</strong></div><div><span>CATEGORY</span><strong>{selectedSatellite.satellite.categoryLabel}</strong></div><div><span>ALTITUDE</span><strong>{selectedSatellite.satellite.altitudeKm.toFixed(0)} KM</strong></div><div><span>SPEED</span><strong>{selectedSatellite.satellite.speedKmPerSecond.toFixed(2)} KM/S</strong></div></div>
         <div className="earthquake-meta-grid"><div><span>INCLINATION</span><strong>{selectedSatellite.satellite.inclinationDeg.toFixed(2)}°</strong></div><div><span>LATITUDE</span><strong>{selectedSatellite.satellite.latitudeDeg.toFixed(2)}°</strong></div><div><span>LONGITUDE</span><strong>{selectedSatellite.satellite.longitudeDeg.toFixed(2)}°</strong></div><div><span>PERIOD</span><strong>{(1440 / selectedSatellite.satellite.meanMotionRevolutionsPerDay).toFixed(1)} MIN</strong></div></div>
         <div className="earthquake-meta-grid"><div><span>EPOCH</span><strong>{formatUtc(selectedSatellite.satellite.epoch)}</strong></div></div>
-        <a className="earthquake-source" href={`https://celestrak.org/NORAD/elements/?CATNR=${selectedSatellite.satellite.noradCatalogId}`} target="_blank" rel="noreferrer">OPEN CELESTRAK <span>↗</span></a>
+        <a className="earthquake-source" href={`https://db.satnogs.org/satellite/${selectedSatellite.satellite.noradCatalogId}/`} target="_blank" rel="noreferrer">OPEN SATNOGS DB <span>↗</span></a>
       </aside>}
 
       {selectedEarthquake && <aside className="earthquake-detail earthquake-detail--anchored" style={{ left: selectedEarthquake.x > window.innerWidth / 2 ? Math.max(16, selectedEarthquake.x - 356) : Math.min(Math.max(16, window.innerWidth - 356), selectedEarthquake.x + 18), top: selectedEarthquake.y > window.innerHeight / 2 ? Math.max(16, selectedEarthquake.y - 292) : Math.min(Math.max(16, window.innerHeight - 292), selectedEarthquake.y + 18), right: "auto", bottom: "auto", transform: "none", width: "min(340px, calc(100vw - 32px))" }}>
@@ -198,6 +233,7 @@ export default function ExplorePage() {
         </div></section>
         <section className="hub-section hub-section--compact"><div className="section-label"><span>MAP</span><span>02</span></div><div className="segmented-control">{["Satellite", "Terrain"].map((mode) => <button key={mode} className={mapMode === mode ? "is-selected" : ""} onClick={() => setMapMode(mode)}>{mode}</button>)}</div></section>
         <section className="hub-section hub-section--compact"><div className="section-label"><span>VIEW</span><span>01</span></div><button className="reset-view" onClick={resetIndia}><span>Reset to India</span><span>↗</span></button></section>
+        {aircraftCount !== null && activeLayers.includes("aircraft") && <div className="hub-live-summary"><span>INDIA REGION / AIRCRAFT</span><strong>{aircraftCount} AIRCRAFT LOADED</strong></div>}
         {earthquakeCount !== null && activeLayers.includes("earthquakes") && <div className="hub-live-summary"><span>INDIA REGION / EARTHQUAKES</span><strong>{earthquakeCount} EVENTS LOADED</strong></div>}
         {naturalEventCount !== null && activeLayers.includes("events") && <div className="hub-live-summary"><span>INDIA REGION / NATURAL EVENTS</span><strong>{naturalEventCount} EVENTS LOADED</strong></div>}
         {satelliteActive && satelliteCount !== null && <div className="hub-live-summary"><span>ORBITAL CATALOG / {satelliteFilterLabel}</span><strong>{satelliteCount} DISPLAYED / {satelliteCatalogCount ?? "—"} CATALOG</strong></div>}
