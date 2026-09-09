@@ -40,19 +40,25 @@ async function fetchRegion(center: { lat: number; lon: number }, signal: AbortSi
 
 export async function GET(request: Request) {
   try {
-    const payloads = await Promise.all(
+    const results = await Promise.allSettled(
       AIRCRAFT_QUERY_CENTERS.map((center) => fetchRegion(center, request.signal)),
     );
 
-    const aircraft = payloads.flatMap((payload) => Array.isArray(payload.ac) ? payload.ac : []);
-    const fetchedAt = Date.now();
+    if (results.every((result) => result.status === "rejected")) {
+      throw new Error("All ADSB.lol region queries failed");
+    }
+
+    const aircraft = results.flatMap((result) =>
+      result.status === "fulfilled" && Array.isArray(result.value.ac) ? result.value.ac : [],
+    );
 
     return NextResponse.json(
       {
         aircraft,
-        fetchedAt,
+        fetchedAt: Date.now(),
         source: "adsb.lol",
         queryCenters: AIRCRAFT_QUERY_CENTERS.length,
+        successfulQueries: results.filter((result) => result.status === "fulfilled").length,
       },
       {
         headers: {
