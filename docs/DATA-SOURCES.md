@@ -2,15 +2,23 @@
 
 ## Aircraft
 
-NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snapshots. The API is available to everyone and its public data/API are licensed under **ODbL 1.0**. ADSB.lol also states that its API rate limits are dynamic based on environment load, so NAYAN deliberately keeps its initial aircraft collector conservative.
+NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snapshots. The API is available to everyone and its public data/API are licensed under **ODbL 1.0**. ADSB.lol also states that its API rate limits are dynamic based on environment load, so NAYAN uses a controlled aircraft collector.
 
-### Initial collection strategy
+### India collection strategy
 
-The first aircraft release uses **one 250 NM India-core query** through the server-side `/api/aircraft` proxy. The server caches successful snapshots for 30 seconds and can serve a last-known snapshot for up to 5 minutes when the upstream temporarily returns `420`/`429` or another transient failure.
+The aircraft layer uses an **overlapping India-region grid** through the server-side `/api/aircraft` proxy:
 
-The browser polls NAYAN every 30 seconds; it never calls ADSB.lol directly. Aircraft positions are normalized into `NayanAircraft` and rendered locally in Cesium with smooth interpolation between snapshots.
+- 9 geographic cells are queried sequentially rather than concurrently.
+- Each cell uses a 300 NM radius.
+- A deliberate delay is inserted between upstream requests.
+- Aircraft from successful cells are merged and deduplicated by ICAO24.
+- Successful snapshots are cached for 60 seconds.
+- If a refresh fails, the last successful snapshot can remain available for up to 5 minutes.
+- The browser never calls ADSB.lol directly.
 
-This is intentionally a foundation rather than final India-wide coverage. If NAYAN needs broader coverage, the next step should be a dedicated collector/cache service with controlled regional fan-out—not increasing simultaneous browser/API requests.
+This provides substantially broader India coverage than a single 250 NM center query while avoiding a burst of simultaneous upstream requests.
+
+Aircraft positions are normalized into `NayanAircraft` and rendered locally in Cesium with smooth interpolation between snapshots.
 
 The aircraft layer intentionally avoids OpenSky in the initial release because OpenSky's current terms require written agreement for operational use of its REST API, including non-profit use.
 
