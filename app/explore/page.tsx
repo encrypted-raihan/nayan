@@ -15,6 +15,15 @@ type SatelliteSelection = { satellite: NayanSatellite; x: number; y: number };
 type SatelliteFilterMode = "important" | "all" | "category";
 type SatelliteFilter = { mode: SatelliteFilterMode; category?: NayanSatelliteCategory };
 
+type AircraftLayerStatus = {
+  count: number;
+  successfulQueries: number;
+  totalQueries: number;
+  complete: boolean;
+  stale: boolean;
+  ageMs: number;
+};
+
 const layers: Layer[] = [
   { id: "earthquakes", label: "Earthquakes", detail: "INDIA + SURROUNDING REGION", status: "live", icon: "🌋" },
   { id: "events", label: "Natural Events", detail: "INDIA + SURROUNDING REGION", status: "live", icon: "🌪️" },
@@ -46,6 +55,12 @@ function formatAircraftNumber(value: number | null, digits = 0, suffix = "") {
   return value === null || !Number.isFinite(value) ? "—" : `${value.toFixed(digits)}${suffix}`;
 }
 
+function formatAge(ageMs: number) {
+  const seconds = Math.max(0, Math.round(ageMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.round(seconds / 60)}m`;
+}
+
 export default function ExplorePage() {
   const [open, setOpen] = useState(false);
   const [activeLayers, setActiveLayers] = useState<string[]>([]);
@@ -55,7 +70,7 @@ export default function ExplorePage() {
   const [selectedEarthquake, setSelectedEarthquake] = useState<EarthquakeSelection | null>(null);
   const [selectedNaturalEvent, setSelectedNaturalEvent] = useState<NaturalEventSelection | null>(null);
   const [selectedSatellite, setSelectedSatellite] = useState<SatelliteSelection | null>(null);
-  const [aircraftCount, setAircraftCount] = useState<number | null>(null);
+  const [aircraftStatus, setAircraftStatus] = useState<AircraftLayerStatus | null>(null);
   const [earthquakeCount, setEarthquakeCount] = useState<number | null>(null);
   const [naturalEventCount, setNaturalEventCount] = useState<number | null>(null);
   const [satelliteCount, setSatelliteCount] = useState<number | null>(null);
@@ -72,7 +87,7 @@ export default function ExplorePage() {
     const onEarthquakeDeselected = () => setSelectedEarthquake(null);
     const onNaturalEventDeselected = () => setSelectedNaturalEvent(null);
     const onSatelliteDeselected = () => setSelectedSatellite(null);
-    const onAircraftLoaded = (event: Event) => { setAircraftCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Aircraft layer updated"); };
+    const onAircraftLoaded = (event: Event) => { setAircraftStatus((event as CustomEvent<AircraftLayerStatus>).detail); setNotice("Aircraft layer updated"); };
     const onEarthquakeLoaded = (event: Event) => { setEarthquakeCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Earthquake layer updated"); };
     const onNaturalEventsLoaded = (event: Event) => { setNaturalEventCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Natural events layer updated"); };
     const onSatellitesFiltered = (event: Event) => {
@@ -80,7 +95,7 @@ export default function ExplorePage() {
       setSatelliteCount(detail.count);
       setSatelliteCatalogCount(detail.catalogCount);
     };
-    const onAircraftCleared = () => { setSelectedAircraft(null); setAircraftCount(null); };
+    const onAircraftCleared = () => { setSelectedAircraft(null); setAircraftStatus(null); };
     const onEarthquakesCleared = () => setSelectedEarthquake(null);
     const onNaturalEventsCleared = () => setSelectedNaturalEvent(null);
     const onSatellitesCleared = () => { setSelectedSatellite(null); setSatelliteCount(null); };
@@ -165,6 +180,7 @@ export default function ExplorePage() {
 
   const satelliteActive = activeLayers.includes("satellites");
   const satelliteFilterLabel = satelliteFilter.mode === "important" ? "IMPORTANT" : satelliteFilter.mode === "all" ? "ALL" : satelliteCategories.find((item) => item.id === satelliteFilter.category)?.label.toUpperCase() ?? "CATEGORY";
+  const aircraftStatusLabel = aircraftStatus?.complete ? "GRID COMPLETE" : aircraftStatus ? `GRID ${aircraftStatus.successfulQueries}/${aircraftStatus.totalQueries}` : "WAITING";
 
   return (
     <main className="explore-page">
@@ -218,14 +234,9 @@ export default function ExplorePage() {
               {satelliteRow && active && <div className={`satellite-controls ${satelliteControlsOpen ? "is-open" : ""}`}>
                 <button className="satellite-filter-summary" onClick={() => setSatelliteControlsOpen((value) => !value)}><span>VIEW / {satelliteFilterLabel}</span><span>{satelliteControlsOpen ? "−" : "+"}</span></button>
                 {satelliteControlsOpen && <div className="satellite-filter-panel">
-                  <div className="satellite-filter-tabs">
-                    <button className={satelliteFilter.mode === "important" ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "important" })}>Important</button>
-                    <button className={satelliteFilter.mode === "all" ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "all" })}>All</button>
-                  </div>
+                  <div className="satellite-filter-tabs"><button className={satelliteFilter.mode === "important" ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "important" })}>Important</button><button className={satelliteFilter.mode === "all" ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "all" })}>All</button></div>
                   <div className="satellite-category-label">BY CATEGORY</div>
-                  <div className="satellite-category-list">
-                    {satelliteCategories.map((category) => <button key={category.id} className={satelliteFilter.mode === "category" && satelliteFilter.category === category.id ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "category", category: category.id })}><span>{category.icon}</span><span>{category.label}</span></button>)}
-                  </div>
+                  <div className="satellite-category-list">{satelliteCategories.map((category) => <button key={category.id} className={satelliteFilter.mode === "category" && satelliteFilter.category === category.id ? "is-selected" : ""} onClick={() => chooseSatelliteFilter({ mode: "category", category: category.id })}><span>{category.icon}</span><span>{category.label}</span></button>)}</div>
                 </div>}
               </div>}
             </div>;
@@ -233,7 +244,7 @@ export default function ExplorePage() {
         </div></section>
         <section className="hub-section hub-section--compact"><div className="section-label"><span>MAP</span><span>02</span></div><div className="segmented-control">{["Satellite", "Terrain"].map((mode) => <button key={mode} className={mapMode === mode ? "is-selected" : ""} onClick={() => setMapMode(mode)}>{mode}</button>)}</div></section>
         <section className="hub-section hub-section--compact"><div className="section-label"><span>VIEW</span><span>01</span></div><button className="reset-view" onClick={resetIndia}><span>Reset to India</span><span>↗</span></button></section>
-        {aircraftCount !== null && activeLayers.includes("aircraft") && <div className="hub-live-summary"><span>INDIA REGION / AIRCRAFT</span><strong>{aircraftCount} AIRCRAFT LOADED</strong></div>}
+        {aircraftStatus && activeLayers.includes("aircraft") && <div className="hub-live-summary"><span>INDIA REGION / AIRCRAFT</span><strong>{aircraftStatus.count} AIRCRAFT · {aircraftStatusLabel} · {aircraftStatus.stale ? `STALE ${formatAge(aircraftStatus.ageMs)}` : `UPDATED ${formatAge(aircraftStatus.ageMs)} AGO`}</strong></div>}
         {earthquakeCount !== null && activeLayers.includes("earthquakes") && <div className="hub-live-summary"><span>INDIA REGION / EARTHQUAKES</span><strong>{earthquakeCount} EVENTS LOADED</strong></div>}
         {naturalEventCount !== null && activeLayers.includes("events") && <div className="hub-live-summary"><span>INDIA REGION / NATURAL EVENTS</span><strong>{naturalEventCount} EVENTS LOADED</strong></div>}
         {satelliteActive && satelliteCount !== null && <div className="hub-live-summary"><span>ORBITAL CATALOG / {satelliteFilterLabel}</span><strong>{satelliteCount} DISPLAYED / {satelliteCatalogCount ?? "—"} CATALOG</strong></div>}
