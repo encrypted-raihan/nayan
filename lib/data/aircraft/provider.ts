@@ -1,12 +1,6 @@
 import { nayanDataEngine } from "../engine";
 import type { NayanDataProvider } from "../provider";
-import {
-  AIRCRAFT_CACHE_SECONDS,
-  AIRCRAFT_QUERY_CENTERS,
-  AIRCRAFT_QUERY_RADIUS_NM,
-  AIRCRAFT_REGION,
-  AIRCRAFT_REFRESH_MS,
-} from "./config";
+import { AIRCRAFT_CACHE_SECONDS, AIRCRAFT_REGION } from "./config";
 import type { AircraftCategory, NayanAircraft } from "./types";
 
 type AdsbAircraft = {
@@ -72,9 +66,7 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
   const altitudeRaw = finiteNumber(item.alt_baro);
   const altitudeMeters = item.alt_baro === "ground" || item.on_ground
     ? null
-    : altitudeRaw !== null
-      ? altitudeRaw * FEET_TO_METERS
-      : null;
+    : altitudeRaw !== null ? altitudeRaw * FEET_TO_METERS : null;
   const groundSpeedRaw = finiteNumber(item.gs);
   const groundSpeedMetersPerSecond = groundSpeedRaw !== null
     ? groundSpeedRaw * KNOTS_TO_METERS_PER_SECOND
@@ -84,7 +76,6 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
   const verticalRateMetersPerSecond = verticalRateRaw !== null
     ? verticalRateRaw * FEET_PER_MINUTE_TO_METERS_PER_SECOND
     : null;
-
   const seenSeconds = Math.max(0, finiteNumber(item.seen_pos) ?? finiteNumber(item.seen) ?? 0);
   const lastSeen = seenAt - seenSeconds * 1000;
   const rawCategory = textOrNull(item.category);
@@ -154,10 +145,8 @@ export const adsbLolAircraftProvider: NayanDataProvider<NayanAircraft[]> = {
 
 export async function fetchIndiaAircraft(signal?: AbortSignal): Promise<NayanAircraft[]> {
   const result = await nayanDataEngine.get(adsbLolAircraftProvider, {
-    cacheTtlMs: Math.max(AIRCRAFT_CACHE_TTL_MS, AIRCRAFT_REFRESH_MS),
+    cacheTtlMs: AIRCRAFT_CACHE_TTL_MS,
     signal,
   });
   return result.data;
 }
-
-export { AIRCRAFT_QUERY_CENTERS, AIRCRAFT_QUERY_RADIUS_NM };
