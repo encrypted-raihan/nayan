@@ -5,15 +5,23 @@ export const AIRCRAFT_REGION = {
   maxLon: 105,
 } as const;
 
-// Keep the first live aircraft implementation deliberately conservative.
-// ADSB.lol applies dynamic rate limits, so NAYAN starts with one 250 NM
-// regional snapshot centered over central India. Coverage can be expanded
-// later with a collector/cache architecture without changing the UI contract.
-export const AIRCRAFT_QUERY_RADIUS_NM = 250;
-export const AIRCRAFT_REFRESH_MS = 30_000;
-export const AIRCRAFT_CACHE_SECONDS = 30;
+// ADSB.lol exposes geographic snapshots by radius. NAYAN uses an overlapping
+// grid and queries it sequentially so coverage grows without creating a burst
+// of concurrent requests.
+export const AIRCRAFT_QUERY_RADIUS_NM = 300;
+export const AIRCRAFT_QUERY_DELAY_MS = 1_500;
+export const AIRCRAFT_REFRESH_MS = 60_000;
+export const AIRCRAFT_CACHE_SECONDS = 60;
 export const AIRCRAFT_STALE_SECONDS = 300;
 
 export const AIRCRAFT_QUERY_CENTERS = [
-  { lat: 22.5726, lon: 79.0000, label: "india-core" },
+  { lat: 33.0, lon: 68.0, label: "northwest" },
+  { lat: 33.0, lon: 80.0, label: "north" },
+  { lat: 33.0, lon: 92.0, label: "northeast" },
+  { lat: 24.0, lon: 68.0, label: "west" },
+  { lat: 24.0, lon: 80.0, label: "north-central" },
+  { lat: 24.0, lon: 92.0, label: "east" },
+  { lat: 14.0, lon: 68.0, label: "southwest" },
+  { lat: 14.0, lon: 80.0, label: "south" },
+  { lat: 14.0, lon: 92.0, label: "southeast" },
 ] as const;
