@@ -5,25 +5,25 @@ export const AIRCRAFT_REGION = {
   maxLon: 105,
 } as const;
 
-// ADSB.lol exposes geographic snapshots by radius. NAYAN deliberately gives
-// southern India and its surrounding airspace more sampling density because
-// this is the current focus area. Requests remain sequential to avoid bursts.
-export const AIRCRAFT_QUERY_RADIUS_NM = 300;
-export const AIRCRAFT_QUERY_DELAY_MS = 4_000;
-export const AIRCRAFT_REFRESH_MS = 120_000;
-export const AIRCRAFT_CACHE_SECONDS = 120;
-export const AIRCRAFT_STALE_SECONDS = 600;
+// NAYAN focuses aircraft collection on southern India and the major national
+// corridors that make the globe feel connected to the rest of India.
+// Each browser refresh advances one city/region instead of waiting for a full
+// country-wide sweep.
+export const AIRCRAFT_QUERY_RADIUS_NM = 250;
+export const AIRCRAFT_QUERY_DELAY_MS = 0;
+export const AIRCRAFT_REFRESH_MS = 15_000;
+export const AIRCRAFT_CACHE_SECONDS = 10;
+export const AIRCRAFT_STALE_SECONDS = 300;
 
-// South-weighted collection grid. The first five cells cover southern India,
-// the Arabian Sea, Bay of Bengal and Sri Lanka approaches. The final two cells
-// retain broad central/northern coverage without spending the whole request
-// budget there.
+// South-first city/corridor coverage. Kerala, Karnataka and Tamil Nadu get the
+// strongest practical coverage, while a few major hubs preserve the national
+// context without attempting to scan all of India every time.
 export const AIRCRAFT_QUERY_CENTERS = [
-  { lat: 18.0, lon: 68.0, label: "southwest" },
-  { lat: 18.0, lon: 80.0, label: "south-central" },
-  { lat: 18.0, lon: 92.0, label: "southeast" },
-  { lat: 8.0, lon: 74.0, label: "deep-southwest" },
-  { lat: 8.0, lon: 84.0, label: "deep-south" },
-  { lat: 27.0, lon: 76.0, label: "north-central" },
-  { lat: 30.0, lon: 91.0, label: "northeast" },
+  { lat: 9.9312, lon: 76.2673, label: "kochi" },
+  { lat: 12.9716, lon: 77.5946, label: "bengaluru" },
+  { lat: 13.0827, lon: 80.2707, label: "chennai" },
+  { lat: 17.3850, lon: 78.4867, label: "hyderabad" },
+  { lat: 19.0760, lon: 72.8777, label: "mumbai" },
+  { lat: 22.5726, lon: 88.3639, label: "kolkata" },
+  { lat: 28.6139, lon: 77.2090, label: "delhi" },
 ] as const;
