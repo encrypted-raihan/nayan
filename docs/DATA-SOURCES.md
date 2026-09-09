@@ -2,25 +2,27 @@
 
 ## Aircraft
 
-NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snapshots. The API is available to everyone and its public data/API are licensed under **ODbL 1.0**. ADSB.lol also states that its API rate limits are dynamic based on environment load, so NAYAN uses a controlled aircraft collector.
+NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snapshots. The API is available to everyone and its public data/API are licensed under **ODbL 1.0**.
 
-### India collection strategy
+### Collection strategy
 
-The aircraft layer uses an **overlapping India-region grid** through the server-side `/api/aircraft` proxy:
+Aircraft collection is deliberately **south-first** rather than a full-India scan on every request. Priority coverage is centered on:
 
-- 9 geographic cells are queried sequentially rather than concurrently.
-- Each cell uses a 300 NM radius.
-- A deliberate delay is inserted between upstream requests.
-- Aircraft from successful cells are merged and deduplicated by ICAO24.
-- Successful snapshots are cached for 60 seconds.
-- If a refresh fails, the last successful snapshot can remain available for up to 5 minutes.
-- The browser never calls ADSB.lol directly.
+- Kochi / Kerala
+- Bengaluru / Karnataka
+- Chennai / Tamil Nadu
+- Hyderabad
+- Mumbai
+- Kolkata
+- Delhi
 
-This provides substantially broader India coverage than a single 250 NM center query while avoiding a burst of simultaneous upstream requests.
+The first three centers give southern India the strongest practical coverage. The remaining major hubs create national flight-corridor context without trying to reconstruct the entire ADSB.lol globe.
 
-Aircraft positions are normalized into `NayanAircraft` and rendered locally in Cesium with smooth interpolation between snapshots.
+NAYAN queries **one region per refresh cycle** and accumulates successful regional snapshots. This avoids the long 7–9 request wait that made the Aircraft toggle feel frozen and reduces burst pressure on ADSB.lol. Aircraft are deduplicated by ICAO24 before being sent to Cesium.
 
-The aircraft layer intentionally avoids OpenSky in the initial release because OpenSky's current terms require written agreement for operational use of its REST API, including non-profit use.
+The browser receives the first successful regional snapshot quickly, then subsequent 15-second polls gradually add/update the other priority regions. A throttled upstream region does not erase already collected aircraft.
+
+The production architecture should eventually move this accumulation into a persistent collector/cache rather than relying on process-local state, because serverless function instances are not a durable shared store.
 
 Source: https://www.adsb.lol/docs/open-data/api/
 License: https://opendatacommons.org/licenses/odbl/1-0/
