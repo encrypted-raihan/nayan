@@ -54,10 +54,68 @@ type AircraftVisual = {
   aircraft: NayanAircraft;
   billboard: any;
   position: any;
-  targetPosition: any;
+  observationPosition: any;
+  observationAltitudeMeters: number | null;
+  observationAt: number;
+  transitionOffset: any;
   transitionStart: number;
   transitionDuration: number;
 };
+
+const AIRCRAFT_EARTH_RADIUS_METERS = 6_371_000;
+const AIRCRAFT_MAX_PREDICTION_SECONDS = 90;
+const AIRCRAFT_CORRECTION_SECONDS = 1.5;
+
+function normalizeLongitude(longitudeDeg: number): number {
+  return ((longitudeDeg + 540) % 360) - 180;
+}
+
+function predictAircraftPosition(aircraft: NayanAircraft, nowMs: number) {
+  const ageSeconds = Math.min(
+    AIRCRAFT_MAX_PREDICTION_SECONDS,
+    Math.max(0, (nowMs - aircraft.lastSeen) / 1000),
+  );
+
+  if (
+    aircraft.groundSpeedMetersPerSecond === null ||
+    aircraft.headingDeg === null ||
+    aircraft.groundSpeedMetersPerSecond <= 0 ||
+    ageSeconds <= 0
+  ) {
+    return {
+      latitude: aircraft.latitude,
+      longitude: aircraft.longitude,
+      altitudeMeters: aircraft.altitudeMeters,
+    };
+  }
+
+  const distanceMeters = aircraft.groundSpeedMetersPerSecond * ageSeconds;
+  const angularDistance = distanceMeters / AIRCRAFT_EARTH_RADIUS_METERS;
+  const bearing = (aircraft.headingDeg * Math.PI) / 180;
+  const latitude = (aircraft.latitude * Math.PI) / 180;
+  const longitude = (aircraft.longitude * Math.PI) / 180;
+  const sinLatitude = Math.sin(latitude);
+  const cosLatitude = Math.cos(latitude);
+  const sinAngularDistance = Math.sin(angularDistance);
+  const cosAngularDistance = Math.cos(angularDistance);
+
+  const predictedLatitude = Math.asin(
+    sinLatitude * cosAngularDistance +
+      cosLatitude * sinAngularDistance * Math.cos(bearing),
+  );
+  const predictedLongitude = longitude + Math.atan2(
+    Math.sin(bearing) * sinAngularDistance * cosLatitude,
+    cosAngularDistance - sinLatitude * Math.sin(predictedLatitude),
+  );
+
+  return {
+    latitude: (predictedLatitude * 180) / Math.PI,
+    longitude: normalizeLongitude((predictedLongitude * 180) / Math.PI),
+    altitudeMeters: aircraft.altitudeMeters !== null && aircraft.verticalRateMetersPerSecond !== null
+      ? Math.max(0, aircraft.altitudeMeters + aircraft.verticalRateMetersPerSecond * ageSeconds)
+      : aircraft.altitudeMeters,
+  };
+}
 
 export default function NayanGlobe() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -312,20 +370,32 @@ export default function NayanGlobe() {
         return;
       }
 
-      let moving = false;
+      const nowMs = Date.now();
       for (const visual of aircraftVisuals.values()) {
-        const elapsed = Math.max(0, time - visual.transitionStart);
-        const progress = Math.min(1, elapsed / visual.transitionDuration);
-        if (progress < 1) moving = true;
-        const eased = progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-        CesiumRef.Cartesian3.lerp(visual.position, visual.targetPosition, eased, visual.position);
+        const aircraft = visual.aircraft;
+        const predicted = predictAircraftPosition(aircraft, nowMs);
+        const desired = CesiumRef.Cartesian3.fromDegrees(
+          predicted.longitude,
+          predicted.latitude,
+          Math.max(80, predicted.altitudeMeters ?? 80),
+        );
+
+        const correctionElapsed = Math.max(0, time - visual.transitionStart);
+        const correctionProgress = Math.min(1, correctionElapsed / visual.transitionDuration);
+        const eased = correctionProgress < 0.5
+          ? 4 * correctionProgress * correctionProgress * correctionProgress
+          : 1 - Math.pow(-2 * correctionProgress + 2, 3) / 2;
+
+        if (correctionProgress < 1) {
+          CesiumRef.Cartesian3.lerp(visual.position, desired, eased, visual.position);
+        } else {
+          visual.position = desired;
+        }
         visual.billboard.position = visual.position;
       }
 
       viewer.scene.requestRender();
-      aircraftAnimationFrame = moving ? window.requestAnimationFrame(runAircraftAnimation) : null;
+      aircraftAnimationFrame = window.requestAnimationFrame(runAircraftAnimation);
     };
 
     const ensureAircraftAnimation = () => {
@@ -363,7 +433,10 @@ export default function NayanGlobe() {
           aircraft,
           billboard,
           position: CesiumRef.Cartesian3.clone(target),
-          targetPosition: CesiumRef.Cartesian3.clone(target),
+          observationPosition: CesiumRef.Cartesian3.clone(target),
+          observationAltitudeMeters: aircraft.altitudeMeters,
+          observationAt: aircraft.lastSeen,
+          transitionOffset: new CesiumRef.Cartesian3(0, 0, 0),
           transitionStart: performance.now(),
           transitionDuration: durationMs,
         });
@@ -376,10 +449,11 @@ export default function NayanGlobe() {
       existing.billboard.rotation = aircraft.headingDeg !== null
         ? CesiumRef.Math.toRadians(-aircraft.headingDeg)
         : existing.billboard.rotation;
+      existing.observationPosition = target;
+      existing.observationAltitudeMeters = aircraft.altitudeMeters;
+      existing.observationAt = aircraft.lastSeen;
       existing.transitionStart = performance.now();
       existing.transitionDuration = durationMs;
-      CesiumRef.Cartesian3.clone(existing.position, existing.position);
-      existing.targetPosition = target;
       seenIds.add(aircraft.icao24);
     };
 
@@ -388,7 +462,7 @@ export default function NayanGlobe() {
       if (!aircraftPoints) aircraftPoints = viewer.scene.primitives.add(new CesiumRef.BillboardCollection());
 
       const seenIds = new Set<string>();
-      for (const aircraft of aircraftList) addOrUpdateAircraft(aircraft, 1200, seenIds);
+      for (const aircraft of aircraftList) addOrUpdateAircraft(aircraft, AIRCRAFT_CORRECTION_SECONDS * 1000, seenIds);
 
       for (const [icao24, visual] of aircraftVisuals) {
         if (seenIds.has(icao24)) continue;
@@ -405,9 +479,6 @@ export default function NayanGlobe() {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       clearAircraft();
       aircraftAbortController = new AbortController();
-
-      // Create the collection before the network request so activating the layer
-      // never waits on data before Cesium gets a chance to render.
       aircraftPoints = viewer.scene.primitives.add(new CesiumRef.BillboardCollection());
       viewer.scene.requestRender();
       window.dispatchEvent(new CustomEvent("nayan:aircraft-loading"));
