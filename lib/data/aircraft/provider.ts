@@ -29,7 +29,7 @@ const KNOTS_TO_METERS_PER_SECOND = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const FEET_PER_MINUTE_TO_METERS_PER_SECOND = FEET_TO_METERS / 60;
 const EARTH_RADIUS_METERS = 6_371_000;
-const MAX_POSITION_PREDICTION_SECONDS = 20;
+const MAX_POSITION_PREDICTION_SECONDS = 90;
 
 function textOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -140,8 +140,8 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
   const rawCategory = textOrNull(item.category);
 
   // ADS-B gives us a real observation timestamp plus ground speed and track.
-  // Project only the short interval since that observation so the globe can
-  // show continuous movement without inventing a long-term trajectory.
+  // Project only a bounded horizon from that observation so the globe can keep
+  // aircraft moving between network updates without inventing an open-ended route.
   const predictionAgeSeconds = Math.min(
     Math.max(0, (Date.now() - lastSeen) / 1000),
     MAX_POSITION_PREDICTION_SECONDS,
