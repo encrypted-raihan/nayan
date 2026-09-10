@@ -28,8 +28,6 @@ const AIRCRAFT_CACHE_TTL_MS = AIRCRAFT_CACHE_SECONDS * 1000;
 const KNOTS_TO_METERS_PER_SECOND = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const FEET_PER_MINUTE_TO_METERS_PER_SECOND = FEET_TO_METERS / 60;
-const EARTH_RADIUS_METERS = 6_371_000;
-const MAX_POSITION_PREDICTION_SECONDS = 90;
 
 function textOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -52,63 +50,6 @@ function normalizeCategory(raw: string | null, aircraftType: string | null, dbFl
   if (["A1", "A2", "A6"].includes(category)) return "general-aviation";
   if (category.startsWith("B")) return "special";
   return "unknown";
-}
-
-function normalizeLongitude(longitudeDeg: number): number {
-  return ((longitudeDeg + 540) % 360) - 180;
-}
-
-function predictPosition(
-  latitudeDeg: number,
-  longitudeDeg: number,
-  altitudeMeters: number | null,
-  groundSpeedMetersPerSecond: number | null,
-  headingDeg: number | null,
-  verticalRateMetersPerSecond: number | null,
-  ageSeconds: number,
-) {
-  if (
-    groundSpeedMetersPerSecond === null ||
-    headingDeg === null ||
-    groundSpeedMetersPerSecond <= 0 ||
-    ageSeconds <= 0
-  ) {
-    return { latitudeDeg, longitudeDeg, altitudeMeters };
-  }
-
-  const distanceMeters = groundSpeedMetersPerSecond * ageSeconds;
-  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
-  const bearing = (headingDeg * Math.PI) / 180;
-  const latitude = (latitudeDeg * Math.PI) / 180;
-  const longitude = (longitudeDeg * Math.PI) / 180;
-
-  const sinLatitude = Math.sin(latitude);
-  const cosLatitude = Math.cos(latitude);
-  const sinAngularDistance = Math.sin(angularDistance);
-  const cosAngularDistance = Math.cos(angularDistance);
-
-  const predictedLatitude = Math.asin(
-    sinLatitude * cosAngularDistance +
-      cosLatitude * sinAngularDistance * Math.cos(bearing),
-  );
-
-  const predictedLongitude =
-    longitude +
-    Math.atan2(
-      Math.sin(bearing) * sinAngularDistance * cosLatitude,
-      cosAngularDistance - sinLatitude * Math.sin(predictedLatitude),
-    );
-
-  const predictedAltitude =
-    altitudeMeters !== null && verticalRateMetersPerSecond !== null
-      ? Math.max(0, altitudeMeters + verticalRateMetersPerSecond * ageSeconds)
-      : altitudeMeters;
-
-  return {
-    latitudeDeg: (predictedLatitude * 180) / Math.PI,
-    longitudeDeg: normalizeLongitude((predictedLongitude * 180) / Math.PI),
-    altitudeMeters: predictedAltitude,
-  };
 }
 
 function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lol"): NayanAircraft | null {
@@ -139,23 +80,6 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
   const lastSeen = seenAt - seenSeconds * 1000;
   const rawCategory = textOrNull(item.category);
 
-  // ADS-B gives us a real observation timestamp plus ground speed and track.
-  // Project only a bounded horizon from that observation so the globe can keep
-  // aircraft moving between network updates without inventing an open-ended route.
-  const predictionAgeSeconds = Math.min(
-    Math.max(0, (Date.now() - lastSeen) / 1000),
-    MAX_POSITION_PREDICTION_SECONDS,
-  );
-  const predicted = predictPosition(
-    latitude,
-    longitude,
-    altitudeMeters,
-    groundSpeedMetersPerSecond,
-    headingDeg,
-    verticalRateMetersPerSecond,
-    predictionAgeSeconds,
-  );
-
   return {
     id: icao24,
     icao24,
@@ -164,9 +88,9 @@ function normalizeAircraft(item: AdsbAircraft, seenAt: number, source = "adsb.lo
     aircraftType,
     category: normalizeCategory(rawCategory, aircraftType, finiteNumber(item.dbFlags)),
     rawCategory,
-    latitude: predicted.latitudeDeg,
-    longitude: predicted.longitudeDeg,
-    altitudeMeters: predicted.altitudeMeters,
+    latitude,
+    longitude,
+    altitudeMeters,
     groundSpeedMetersPerSecond,
     headingDeg,
     verticalRateMetersPerSecond,
