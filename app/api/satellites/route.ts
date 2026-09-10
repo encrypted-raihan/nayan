@@ -15,7 +15,9 @@ type SatnogsTle = {
 
 type SatnogsPage = SatnogsTle[] | { results?: SatnogsTle[]; next?: string | null };
 
-export const revalidate = CACHE_SECONDS;
+// Next.js requires route config values such as revalidate to be statically
+// analyzable literals. Keep the runtime cache constant separate from this export.
+export const revalidate = 7200;
 
 async function fetchSatnogsPage(url: string, signal: AbortSignal) {
   const response = await fetch(url, {
