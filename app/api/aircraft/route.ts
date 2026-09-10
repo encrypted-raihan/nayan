@@ -43,7 +43,8 @@ let nextCenterIndex = 0;
 let refreshInFlight: Promise<AircraftPayload> | null = null;
 let lastRateLimitedAt = 0;
 
-export const revalidate = AIRCRAFT_CACHE_SECONDS;
+// Next.js requires route config values to be statically analyzable literals.
+export const revalidate = 10;
 
 function aircraftUrl(lat: number, lon: number) {
   return `${ADSB_LOL_BASE}/${lat.toFixed(4)}/lon/${lon.toFixed(4)}/dist/${AIRCRAFT_QUERY_RADIUS_NM}`;
