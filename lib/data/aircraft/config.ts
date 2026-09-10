@@ -12,6 +12,7 @@ export const AIRCRAFT_QUERY_DELAY_MS = 0;
 export const AIRCRAFT_REFRESH_MS = 10_000;
 export const AIRCRAFT_CACHE_SECONDS = 10;
 export const AIRCRAFT_STALE_SECONDS = 300;
+export const AIRCRAFT_MAX_DISPLAY = 600;
 
 // Coverage priorities: Kerala, Karnataka, Tamil Nadu and Goa are dense first,
 // then western, central, northern and eastern/northeastern corridors fill in.
