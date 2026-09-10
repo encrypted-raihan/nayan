@@ -1,9 +1,9 @@
 import { nayanDataEngine } from "../engine";
-import { celestrakActiveSatelliteProvider } from "./provider";
+import { satnogsActiveSatelliteProvider } from "./provider";
 import type { NayanSatelliteRecord } from "./provider";
 
 export async function fetchActiveSatellites(signal?: AbortSignal): Promise<NayanSatelliteRecord[]> {
-  const result = await nayanDataEngine.get(celestrakActiveSatelliteProvider, {
+  const result = await nayanDataEngine.get(satnogsActiveSatelliteProvider, {
     cacheTtlMs: 2 * 60 * 60 * 1000,
     signal,
   });
