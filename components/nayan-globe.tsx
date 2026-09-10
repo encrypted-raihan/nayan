@@ -55,6 +55,8 @@ type AircraftVisual = {
   billboard: any;
   position: any;
   targetPosition: any;
+  transitionStart: number;
+  transitionDuration: number;
 };
 
 export default function NayanGlobe() {
@@ -304,6 +306,34 @@ export default function NayanGlobe() {
       if (satelliteRecords.size) renderSatellites();
     };
 
+    const runAircraftAnimation = (time: number) => {
+      if (cancelled || !viewer || viewer.isDestroyed() || !aircraftPoints || !CesiumRef) {
+        aircraftAnimationFrame = null;
+        return;
+      }
+
+      let moving = false;
+      for (const visual of aircraftVisuals.values()) {
+        const elapsed = Math.max(0, time - visual.transitionStart);
+        const progress = Math.min(1, elapsed / visual.transitionDuration);
+        if (progress < 1) moving = true;
+        const eased = progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+        CesiumRef.Cartesian3.lerp(visual.position, visual.targetPosition, eased, visual.position);
+        visual.billboard.position = visual.position;
+      }
+
+      viewer.scene.requestRender();
+      aircraftAnimationFrame = moving ? window.requestAnimationFrame(runAircraftAnimation) : null;
+    };
+
+    const ensureAircraftAnimation = () => {
+      if (aircraftAnimationFrame === null) {
+        aircraftAnimationFrame = window.requestAnimationFrame(runAircraftAnimation);
+      }
+    };
+
     const addOrUpdateAircraft = (aircraft: NayanAircraft, durationMs: number, seenIds: Set<string>) => {
       if (!aircraftPoints || !CesiumRef) return;
       const target = CesiumRef.Cartesian3.fromDegrees(
@@ -318,15 +348,15 @@ export default function NayanGlobe() {
           id: `nayan-aircraft-${aircraft.icao24}`,
           image: AIRCRAFT_GLYPH_URL,
           position: target,
-          width: 24,
-          height: 24,
+          width: 22,
+          height: 22,
           rotation: aircraft.headingDeg !== null ? CesiumRef.Math.toRadians(-aircraft.headingDeg) : 0,
           alignedAxis: CesiumRef.Cartesian3.UNIT_Z,
           verticalOrigin: CesiumRef.VerticalOrigin.CENTER,
           horizontalOrigin: CesiumRef.HorizontalOrigin.CENTER,
           disableDepthTestDistance: 0,
           translucencyByDistance: new CesiumRef.NearFarScalar(100000, 1.0, 12000000, 0.58),
-          scaleByDistance: new CesiumRef.NearFarScalar(100000, 1.0, 20000000, 0.68),
+          scaleByDistance: new CesiumRef.NearFarScalar(100000, 0.95, 20000000, 0.65),
         });
         billboard._nayanAircraft = aircraft;
         aircraftVisuals.set(aircraft.icao24, {
@@ -334,6 +364,8 @@ export default function NayanGlobe() {
           billboard,
           position: CesiumRef.Cartesian3.clone(target),
           targetPosition: CesiumRef.Cartesian3.clone(target),
+          transitionStart: performance.now(),
+          transitionDuration: durationMs,
         });
         seenIds.add(aircraft.icao24);
         return;
@@ -341,24 +373,14 @@ export default function NayanGlobe() {
 
       existing.aircraft = aircraft;
       existing.billboard._nayanAircraft = aircraft;
-      existing.billboard.rotation = aircraft.headingDeg !== null ? CesiumRef.Math.toRadians(-aircraft.headingDeg) : existing.billboard.rotation;
+      existing.billboard.rotation = aircraft.headingDeg !== null
+        ? CesiumRef.Math.toRadians(-aircraft.headingDeg)
+        : existing.billboard.rotation;
+      existing.transitionStart = performance.now();
+      existing.transitionDuration = durationMs;
+      CesiumRef.Cartesian3.clone(existing.position, existing.position);
       existing.targetPosition = target;
       seenIds.add(aircraft.icao24);
-
-      const start = CesiumRef.Cartesian3.clone(existing.position);
-      const startTime = performance.now();
-      const animate = (time: number) => {
-        if (cancelled || !viewer || viewer.isDestroyed() || !aircraftPoints) return;
-        const progress = Math.min(1, (time - startTime) / durationMs);
-        const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-        CesiumRef.Cartesian3.lerp(start, existing.targetPosition, eased, existing.position);
-        existing.billboard.position = existing.position;
-        viewer.scene.requestRender();
-        if (progress < 1) aircraftAnimationFrame = window.requestAnimationFrame(animate);
-        else aircraftAnimationFrame = null;
-      };
-      if (aircraftAnimationFrame !== null) window.cancelAnimationFrame(aircraftAnimationFrame);
-      aircraftAnimationFrame = window.requestAnimationFrame(animate);
     };
 
     const renderAircraftSnapshot = (aircraftList: NayanAircraft[]) => {
@@ -375,6 +397,7 @@ export default function NayanGlobe() {
       }
 
       window.dispatchEvent(new CustomEvent("nayan:aircraft-loaded", { detail: { count: aircraftVisuals.size } }));
+      ensureAircraftAnimation();
       viewer.scene.requestRender();
     };
 
@@ -382,6 +405,12 @@ export default function NayanGlobe() {
       if (!viewer || viewer.isDestroyed() || !CesiumRef) return;
       clearAircraft();
       aircraftAbortController = new AbortController();
+
+      // Create the collection before the network request so activating the layer
+      // never waits on data before Cesium gets a chance to render.
+      aircraftPoints = viewer.scene.primitives.add(new CesiumRef.BillboardCollection());
+      viewer.scene.requestRender();
+      window.dispatchEvent(new CustomEvent("nayan:aircraft-loading"));
 
       const refresh = async () => {
         if (cancelled || !viewer || viewer.isDestroyed()) return;
@@ -396,9 +425,8 @@ export default function NayanGlobe() {
         }
       };
 
-      await refresh();
-      if (cancelled || !viewer || viewer.isDestroyed()) return;
-      aircraftPollTimer = window.setInterval(() => void refresh(), 15000);
+      void refresh();
+      aircraftPollTimer = window.setInterval(() => void refresh(), 10_000);
     };
 
     const flyToEarthquake = (earthquake: NayanEarthquake) => {
