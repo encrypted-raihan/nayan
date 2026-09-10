@@ -6,21 +6,29 @@ NAYAN uses the public **ADSB.lol Open Data API** for live aircraft position snap
 
 ### Collection strategy
 
-Aircraft collection is deliberately **south-first** rather than a full-India scan on every request. Priority coverage is centered on:
+Aircraft collection is deliberately **south-first with all-India corridor coverage** rather than a full-India scan on every request. Priority coverage is centered on:
 
 - Kochi / Kerala
 - Bengaluru / Karnataka
 - Chennai / Tamil Nadu
-- Hyderabad
-- Mumbai
-- Kolkata
-- Delhi
+- Coimbatore / Tamil Nadu
+- Goa
+- Ahmedabad / Gujarat
+- Mumbai / Maharashtra
+- Hyderabad / Telangana
+- Delhi / NCR
+- Patna / Bihar
+- Bhubaneswar / Odisha
+- Kolkata / West Bengal
+- Guwahati / Northeast
 
-The first three centers give southern India the strongest practical coverage. The remaining major hubs create national flight-corridor context without trying to reconstruct the entire ADSB.lol globe.
+Kerala, Karnataka, Tamil Nadu and Goa get strong early coverage. Western, northern, eastern and northeastern hubs then fill the right side of the India view so the globe reads as a connected national flight network rather than a southern-only map.
 
-NAYAN queries **one region per refresh cycle** and accumulates successful regional snapshots. This avoids the long 7–9 request wait that made the Aircraft toggle feel frozen and reduces burst pressure on ADSB.lol. Aircraft are deduplicated by ICAO24 before being sent to Cesium.
+NAYAN queries **one region per refresh cycle** and accumulates successful regional snapshots. This avoids the long multi-request wait that made the Aircraft toggle feel frozen and reduces burst pressure on ADSB.lol. Aircraft are deduplicated by ICAO24 before being sent to Cesium.
 
-The browser receives the first successful regional snapshot quickly, then subsequent 15-second polls gradually add/update the other priority regions. A throttled upstream region does not erase already collected aircraft.
+The browser creates the aircraft primitive immediately, then receives the first successful regional snapshot without blocking the globe. Subsequent 10-second polls gradually add/update the other priority regions. A throttled upstream region does not erase already collected aircraft.
+
+The merged payload is capped at **600 freshest aircraft** before rendering. This keeps Cesium responsive while still providing enough density to make India feel active across the full country.
 
 The production architecture should eventually move this accumulation into a persistent collector/cache rather than relying on process-local state, because serverless function instances are not a durable shared store.
 
