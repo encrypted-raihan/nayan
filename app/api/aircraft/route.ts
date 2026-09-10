@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   AIRCRAFT_CACHE_SECONDS,
+  AIRCRAFT_MAX_DISPLAY,
   AIRCRAFT_QUERY_CENTERS,
   AIRCRAFT_QUERY_RADIUS_NM,
   AIRCRAFT_STALE_SECONDS,
@@ -36,8 +37,7 @@ type AircraftPayload = {
 
 // Instead of waiting 30–60 seconds to scan the whole country, NAYAN collects
 // one priority region per request and accumulates the successful snapshots.
-// This makes the Aircraft toggle feel immediate while still building broad
-// coverage over several polling cycles.
+// This keeps activation responsive while building broad national coverage.
 const regionalSnapshots = new Map<string, RegionalSnapshot>();
 let nextCenterIndex = 0;
 let refreshInFlight: Promise<AircraftPayload> | null = null;
@@ -91,8 +91,19 @@ function buildMergedSnapshot(updatedCenter: string | null, stale = false): Aircr
     }
   }
 
+  // Keep the freshest positions when the accumulated regional snapshots become
+  // large. This protects Cesium from thousands of billboards while preserving
+  // the visual impression of traffic across the whole country.
+  const aircraft = [...deduped.values()]
+    .sort((a, b) => {
+      const aSeen = typeof a.seen_pos === "number" ? a.seen_pos : typeof a.seen === "number" ? a.seen : 9999;
+      const bSeen = typeof b.seen_pos === "number" ? b.seen_pos : typeof b.seen === "number" ? b.seen : 9999;
+      return aSeen - bSeen;
+    })
+    .slice(0, AIRCRAFT_MAX_DISPLAY);
+
   return {
-    aircraft: [...deduped.values()],
+    aircraft,
     fetchedAt: latestFetchedAt || Date.now(),
     source: "adsb.lol",
     queryCenters: AIRCRAFT_QUERY_CENTERS.length,
