@@ -1,4 +1,4 @@
-import { normalizeAisPositionMessage, type NayanShip } from "../../../../lib/data/ships/provider";
+import { normalizeAisPositionMessage, type NayanShip } from "../../../lib/data/ships/provider";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
