@@ -14,7 +14,9 @@ declare global {
 const SHIP_GLYPH = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" viewBox="0 0 52 52">
   <g fill="white" stroke="#111" stroke-width="2" stroke-linejoin="round">
-    <path d="M26 4l5 12 11 7-4 3-6-1 4 14-10-6-10 6 4-14-6 1-4-3 11-7z"/>
+    <path d="M26 3L36 17l4 18c1 5-3 11-9 13H21c-6-2-10-8-9-13l4-18z"/>
+    <rect x="21" y="19" width="10" height="11" rx="1"/>
+    <path d="M17 35h18" fill="none" stroke-width="3"/>
   </g>
 </svg>`)} `;
 const SHIP_GLYPH_URL = SHIP_GLYPH.trim();
@@ -76,12 +78,6 @@ function installCesiumSetterBridge() {
   });
 
   window.__NAYAN_CESIUM_BRIDGE_INSTALLED__ = true;
-
-  if (current?.Viewer && typeof current.Viewer === "function") {
-    // The getter/setter above now guarantees that a future Viewer construction
-    // passes through ViewerProxy. If a viewer already exists, the globe layer
-    // will publish it separately through the ready event.
-  }
 }
 
 export default function NayanShipLayer() {
