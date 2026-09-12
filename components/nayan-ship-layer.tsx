@@ -7,7 +7,6 @@ declare global {
   interface Window {
     Cesium?: any;
     __NAYAN_CESIUM_VIEWER__?: any;
-    __NAYAN_CESIUM_VIEWER_BRIDGE__?: boolean;
   }
 }
 
@@ -21,7 +20,7 @@ const SHIP_GLYPH_URL = SHIP_GLYPH.trim();
 
 const installViewerBridge = () => {
   const Cesium = window.Cesium;
-  if (!Cesium || Cesium.__nayanViewerBridgeInstalled) return;
+  if (!Cesium || (Cesium as any).__nayanViewerBridgeInstalled) return;
 
   const OriginalViewer = Cesium.Viewer;
   if (typeof OriginalViewer !== "function") return;
@@ -36,43 +35,24 @@ const installViewerBridge = () => {
   });
 
   Cesium.Viewer = ViewerProxy;
-  Cesium.__nayanViewerBridgeInstalled = true;
-  window.__NAYAN_CESIUM_VIEWER_BRIDGE__ = true;
+  (Cesium as any).__nayanViewerBridgeInstalled = true;
 };
-
-function decodeStatus(status: number | null) {
-  if (status === null) return "UNKNOWN";
-  const labels: Record<number, string> = {
-    0: "UNDER WAY",
-    1: "AT ANCHOR",
-    2: "NOT UNDER COMMAND",
-    3: "RESTRICTED MANOEUVRABILITY",
-    5: "MOORED",
-    6: "AGROUND",
-    7: "ENGAGED IN FISHING",
-    8: "UNDER WAY · SAILING",
-  };
-  return labels[status] ?? `STATUS ${status}`;
-}
 
 export default function NayanShipLayer() {
   useEffect(() => {
     let viewer: any = null;
     let CesiumRef: any = null;
     let shipsBillboards: any = null;
-    let ships = new Map<string, NayanShip>();
+    const shipBillboards = new Map<string, any>();
     let active = false;
     let pollTimer: number | null = null;
     let readyPollTimer: number | null = null;
     let abortController: AbortController | null = null;
-    let removeViewerListener: (() => void) | null = null;
 
     const clear = () => {
-      if (shipsBillboards && viewer && !viewer.isDestroyed()) {
-        viewer.scene.primitives.remove(shipsBillboards);
-      }
+      if (shipsBillboards && viewer && !viewer.isDestroyed()) viewer.scene.primitives.remove(shipsBillboards);
       shipsBillboards = null;
-      ships.clear();
+      shipBillboards.clear();
       if (viewer && !viewer.isDestroyed()) viewer.scene.requestRender();
     };
 
@@ -89,10 +69,11 @@ export default function NayanShipLayer() {
       const seen = new Set<string>();
       for (const ship of shipList) {
         seen.add(ship.mmsi);
-        ships.set(ship.mmsi, ship);
-        const existing = collection._billboards?.find?.((item: any) => item?._nayanShip?.mmsi === ship.mmsi);
+        const existing = shipBillboards.get(ship.mmsi);
+        const position = CesiumRef.Cartesian3.fromDegrees(ship.longitude, ship.latitude, 40);
+
         if (existing) {
-          existing.position = CesiumRef.Cartesian3.fromDegrees(ship.longitude, ship.latitude, 40);
+          existing.position = position;
           existing.rotation = ship.courseDeg !== null ? CesiumRef.Math.toRadians(-ship.courseDeg) : 0;
           existing._nayanShip = ship;
           continue;
@@ -101,7 +82,7 @@ export default function NayanShipLayer() {
         const billboard = collection.add({
           id: `nayan-ship-${ship.mmsi}`,
           image: SHIP_GLYPH_URL,
-          position: CesiumRef.Cartesian3.fromDegrees(ship.longitude, ship.latitude, 40),
+          position,
           width: 22,
           height: 22,
           rotation: ship.courseDeg !== null ? CesiumRef.Math.toRadians(-ship.courseDeg) : 0,
@@ -113,16 +94,17 @@ export default function NayanShipLayer() {
           translucencyByDistance: new CesiumRef.NearFarScalar(100000, 1.0, 20000000, 0.7),
         });
         billboard._nayanShip = ship;
+        shipBillboards.set(ship.mmsi, billboard);
       }
 
-      for (const [mmsi, ship] of ships) {
-        if (!seen.has(mmsi)) ships.delete(mmsi);
+      for (const [mmsi, billboard] of shipBillboards) {
+        if (seen.has(mmsi)) continue;
+        collection.remove(billboard);
+        shipBillboards.delete(mmsi);
       }
 
       viewer.scene.requestRender();
-      window.dispatchEvent(new CustomEvent("nayan:ships-loaded", {
-        detail: { count: shipList.length },
-      }));
+      window.dispatchEvent(new CustomEvent("nayan:ships-loaded", { detail: { count: shipList.length } }));
     };
 
     const refresh = async () => {
@@ -133,9 +115,7 @@ export default function NayanShipLayer() {
         const result = await fetchIndiaShips(abortController.signal);
         if (!active || !viewer || viewer.isDestroyed()) return;
         render(result.ships);
-        if (result.error) {
-          window.dispatchEvent(new CustomEvent("nayan:ships-error", { detail: { message: result.error } }));
-        }
+        if (result.error) window.dispatchEvent(new CustomEvent("nayan:ships-error", { detail: { message: result.error } }));
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
         window.dispatchEvent(new CustomEvent("nayan:ships-error", {
@@ -179,8 +159,7 @@ export default function NayanShipLayer() {
       if (!active || !viewer || viewer.isDestroyed()) return;
       const canvas = viewer.scene.canvas;
       const rect = canvas.getBoundingClientRect();
-      const position = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      const picked = viewer.scene.pick(position);
+      const picked = viewer.scene.pick({ x: event.clientX - rect.left, y: event.clientY - rect.top });
       const ship = picked?.primitive?._nayanShip as NayanShip | undefined;
       if (!ship || !CesiumRef) return;
 
@@ -224,7 +203,6 @@ export default function NayanShipLayer() {
       window.clearInterval(canvasPoll);
       if (viewer?.scene?.canvas) viewer.scene.canvas.removeEventListener("click", onCanvasClick);
       clear();
-      removeViewerListener?.();
     };
   }, []);
 
