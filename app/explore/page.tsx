@@ -2,16 +2,19 @@
 
 import { useEffect, useState } from "react";
 import NayanGlobe from "../../components/nayan-globe";
+import NayanShipLayer from "../../components/nayan-ship-layer";
 import type { NayanAircraft } from "../../lib/data/aircraft";
 import type { NayanEarthquake } from "../../lib/data/usgs-earthquakes";
 import type { NayanNaturalEvent } from "../../lib/data/eonet-natural-events";
 import type { NayanSatellite, NayanSatelliteCategory } from "../../lib/data/satellites";
+import type { NayanShip } from "../../lib/data/ships";
 
 type Layer = { id: string; label: string; detail: string; status: "demo" | "live"; icon: string };
 type AircraftSelection = { aircraft: NayanAircraft; x: number; y: number };
 type EarthquakeSelection = { earthquake: NayanEarthquake; x: number; y: number };
 type NaturalEventSelection = { event: NayanNaturalEvent; x: number; y: number };
 type SatelliteSelection = { satellite: NayanSatellite; x: number; y: number };
+type ShipSelection = { ship: NayanShip; x: number; y: number };
 type SatelliteFilterMode = "important" | "all" | "category";
 type SatelliteFilter = { mode: SatelliteFilterMode; category?: NayanSatelliteCategory };
 
@@ -29,7 +32,7 @@ const layers: Layer[] = [
   { id: "events", label: "Natural Events", detail: "INDIA + SURROUNDING REGION", status: "live", icon: "🌪️" },
   { id: "satellites", label: "Satellites", detail: "ACTIVE ORBITAL OBJECTS", status: "live", icon: "🛰️" },
   { id: "aircraft", label: "Aircraft", detail: "LIVE FLIGHT TRAFFIC", status: "live", icon: "✈️" },
-  { id: "ships", label: "Ships", detail: "MARITIME TRAFFIC", status: "demo", icon: "🚢" },
+  { id: "ships", label: "Ships", detail: "LIVE MARITIME TRAFFIC", status: "live", icon: "🚢" },
 ];
 
 const satelliteCategories: { id: NayanSatelliteCategory; label: string; icon: string }[] = [
@@ -70,26 +73,32 @@ export default function ExplorePage() {
   const [selectedEarthquake, setSelectedEarthquake] = useState<EarthquakeSelection | null>(null);
   const [selectedNaturalEvent, setSelectedNaturalEvent] = useState<NaturalEventSelection | null>(null);
   const [selectedSatellite, setSelectedSatellite] = useState<SatelliteSelection | null>(null);
+  const [selectedShip, setSelectedShip] = useState<ShipSelection | null>(null);
   const [aircraftStatus, setAircraftStatus] = useState<AircraftLayerStatus | null>(null);
   const [earthquakeCount, setEarthquakeCount] = useState<number | null>(null);
   const [naturalEventCount, setNaturalEventCount] = useState<number | null>(null);
   const [satelliteCount, setSatelliteCount] = useState<number | null>(null);
   const [satelliteCatalogCount, setSatelliteCatalogCount] = useState<number | null>(null);
+  const [shipCount, setShipCount] = useState<number | null>(null);
+  const [shipConnected, setShipConnected] = useState(false);
   const [satelliteFilter, setSatelliteFilter] = useState<SatelliteFilter>({ mode: "important" });
   const [satelliteControlsOpen, setSatelliteControlsOpen] = useState(false);
 
   useEffect(() => {
-    const onAircraftSelected = (event: Event) => { setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedAircraft((event as CustomEvent<AircraftSelection>).detail); };
-    const onEarthquakeSelected = (event: Event) => { setSelectedAircraft(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedEarthquake((event as CustomEvent<EarthquakeSelection>).detail); };
-    const onNaturalEventSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedSatellite(null); setSelectedNaturalEvent((event as CustomEvent<NaturalEventSelection>).detail); };
-    const onSatelliteSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite((event as CustomEvent<SatelliteSelection>).detail); };
+    const onAircraftSelected = (event: Event) => { setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedShip(null); setSelectedAircraft((event as CustomEvent<AircraftSelection>).detail); };
+    const onEarthquakeSelected = (event: Event) => { setSelectedAircraft(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedShip(null); setSelectedEarthquake((event as CustomEvent<EarthquakeSelection>).detail); };
+    const onNaturalEventSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedSatellite(null); setSelectedShip(null); setSelectedNaturalEvent((event as CustomEvent<NaturalEventSelection>).detail); };
+    const onSatelliteSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedShip(null); setSelectedSatellite((event as CustomEvent<SatelliteSelection>).detail); };
+    const onShipSelected = (event: Event) => { setSelectedAircraft(null); setSelectedEarthquake(null); setSelectedNaturalEvent(null); setSelectedSatellite(null); setSelectedShip((event as CustomEvent<ShipSelection>).detail); };
     const onAircraftDeselected = () => setSelectedAircraft(null);
     const onEarthquakeDeselected = () => setSelectedEarthquake(null);
     const onNaturalEventDeselected = () => setSelectedNaturalEvent(null);
     const onSatelliteDeselected = () => setSelectedSatellite(null);
+    const onShipDeselected = () => setSelectedShip(null);
     const onAircraftLoaded = (event: Event) => { setAircraftStatus((event as CustomEvent<AircraftLayerStatus>).detail); setNotice("Aircraft layer updated"); };
     const onEarthquakeLoaded = (event: Event) => { setEarthquakeCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Earthquake layer updated"); };
     const onNaturalEventsLoaded = (event: Event) => { setNaturalEventCount((event as CustomEvent<{ count: number }>).detail.count); setNotice("Natural events layer updated"); };
+    const onShipsLoaded = (event: Event) => { setShipCount((event as CustomEvent<{ count: number }>).detail.count); setShipConnected(true); setNotice("Ship layer updated"); };
     const onSatellitesFiltered = (event: Event) => {
       const detail = (event as CustomEvent<{ count: number; catalogCount: number; filter: SatelliteFilter }>).detail;
       setSatelliteCount(detail.count);
@@ -99,55 +108,66 @@ export default function ExplorePage() {
     const onEarthquakesCleared = () => setSelectedEarthquake(null);
     const onNaturalEventsCleared = () => setSelectedNaturalEvent(null);
     const onSatellitesCleared = () => { setSelectedSatellite(null); setSatelliteCount(null); };
+    const onShipsCleared = () => { setSelectedShip(null); setShipCount(null); setShipConnected(false); };
     const onError = (event: Event) => setNotice((event as CustomEvent<{ message: string }>).detail.message);
 
     window.addEventListener("nayan:aircraft-selected", onAircraftSelected);
     window.addEventListener("nayan:earthquake-selected", onEarthquakeSelected);
     window.addEventListener("nayan:natural-event-selected", onNaturalEventSelected);
     window.addEventListener("nayan:satellite-selected", onSatelliteSelected);
+    window.addEventListener("nayan:ship-selected", onShipSelected);
     window.addEventListener("nayan:aircraft-deselected", onAircraftDeselected);
     window.addEventListener("nayan:earthquake-deselected", onEarthquakeDeselected);
     window.addEventListener("nayan:natural-event-deselected", onNaturalEventDeselected);
     window.addEventListener("nayan:satellite-deselected", onSatelliteDeselected);
+    window.addEventListener("nayan:ship-deselected", onShipDeselected);
     window.addEventListener("nayan:aircraft-loaded", onAircraftLoaded);
     window.addEventListener("nayan:earthquakes-loaded", onEarthquakeLoaded);
     window.addEventListener("nayan:natural-events-loaded", onNaturalEventsLoaded);
+    window.addEventListener("nayan:ships-loaded", onShipsLoaded);
     window.addEventListener("nayan:satellites-filtered", onSatellitesFiltered);
     window.addEventListener("nayan:aircraft-cleared", onAircraftCleared);
     window.addEventListener("nayan:earthquakes-cleared", onEarthquakesCleared);
     window.addEventListener("nayan:natural-events-cleared", onNaturalEventsCleared);
     window.addEventListener("nayan:satellites-cleared", onSatellitesCleared);
+    window.addEventListener("nayan:ships-cleared", onShipsCleared);
     window.addEventListener("nayan:aircraft-error", onError);
     window.addEventListener("nayan:earthquakes-error", onError);
     window.addEventListener("nayan:natural-events-error", onError);
     window.addEventListener("nayan:satellites-error", onError);
+    window.addEventListener("nayan:ships-error", onError);
 
     return () => {
       window.removeEventListener("nayan:aircraft-selected", onAircraftSelected);
       window.removeEventListener("nayan:earthquake-selected", onEarthquakeSelected);
       window.removeEventListener("nayan:natural-event-selected", onNaturalEventSelected);
       window.removeEventListener("nayan:satellite-selected", onSatelliteSelected);
+      window.removeEventListener("nayan:ship-selected", onShipSelected);
       window.removeEventListener("nayan:aircraft-deselected", onAircraftDeselected);
       window.removeEventListener("nayan:earthquake-deselected", onEarthquakeDeselected);
       window.removeEventListener("nayan:natural-event-deselected", onNaturalEventDeselected);
       window.removeEventListener("nayan:satellite-deselected", onSatelliteDeselected);
+      window.removeEventListener("nayan:ship-deselected", onShipDeselected);
       window.removeEventListener("nayan:aircraft-loaded", onAircraftLoaded);
       window.removeEventListener("nayan:earthquakes-loaded", onEarthquakeLoaded);
       window.removeEventListener("nayan:natural-events-loaded", onNaturalEventsLoaded);
+      window.removeEventListener("nayan:ships-loaded", onShipsLoaded);
       window.removeEventListener("nayan:satellites-filtered", onSatellitesFiltered);
       window.removeEventListener("nayan:aircraft-cleared", onAircraftCleared);
       window.removeEventListener("nayan:earthquakes-cleared", onEarthquakesCleared);
       window.removeEventListener("nayan:natural-events-cleared", onNaturalEventsCleared);
       window.removeEventListener("nayan:satellites-cleared", onSatellitesCleared);
+      window.removeEventListener("nayan:ships-cleared", onShipsCleared);
       window.removeEventListener("nayan:aircraft-error", onError);
       window.removeEventListener("nayan:earthquakes-error", onError);
       window.removeEventListener("nayan:natural-events-error", onError);
       window.removeEventListener("nayan:satellites-error", onError);
+      window.removeEventListener("nayan:ships-error", onError);
     };
   }, []);
 
   const toggleLayer = (id: string) => {
-    if (!["aircraft", "earthquakes", "events", "satellites"].includes(id)) {
+    if (!["aircraft", "earthquakes", "events", "satellites", "ships"].includes(id)) {
       setNotice("Demo control — this layer will become live when its data provider is connected.");
       return;
     }
@@ -157,8 +177,9 @@ export default function ExplorePage() {
     setSelectedEarthquake(null);
     setSelectedNaturalEvent(null);
     setSelectedSatellite(null);
+    setSelectedShip(null);
     window.dispatchEvent(new CustomEvent(
-      id === "aircraft" ? "nayan:aircraft-toggle" : id === "earthquakes" ? "nayan:earthquakes-toggle" : id === "events" ? "nayan:natural-events-toggle" : "nayan:satellites-toggle",
+      id === "aircraft" ? "nayan:aircraft-toggle" : id === "earthquakes" ? "nayan:earthquakes-toggle" : id === "events" ? "nayan:natural-events-toggle" : id === "satellites" ? "nayan:satellites-toggle" : "nayan:ships-toggle",
       { detail: enabling },
     ));
   };
@@ -175,6 +196,7 @@ export default function ExplorePage() {
     setSelectedEarthquake(null);
     setSelectedNaturalEvent(null);
     setSelectedSatellite(null);
+    setSelectedShip(null);
     setNotice("India view reset");
   };
 
@@ -184,10 +206,19 @@ export default function ExplorePage() {
 
   return (
     <main className="explore-page">
+      <NayanShipLayer />
       <NayanGlobe />
       <header className="explore-header"><div className="explore-brand">NAYAN</div><div className="explore-context"><span className="live-dot" /><span>INDIA · FROM ABOVE</span></div></header>
       <div className="explore-corner explore-corner--left"><span>01</span><span className="corner-line" /><span>EXPLORE</span></div>
       <div className="explore-corner explore-corner--right"><span>INDIA REGION</span><span className="corner-line" /><span>3D</span></div>
+
+      {selectedShip && <aside className="earthquake-detail earthquake-detail--anchored" style={{ left: selectedShip.x > window.innerWidth / 2 ? Math.max(16, selectedShip.x - 356) : Math.min(Math.max(16, window.innerWidth - 356), selectedShip.x + 18), top: selectedShip.y > window.innerHeight / 2 ? Math.max(16, selectedShip.y - 300) : Math.min(Math.max(16, window.innerHeight - 300), selectedShip.y + 18), right: "auto", bottom: "auto", transform: "none", width: "min(340px, calc(100vw - 32px))" }}>
+        <div className="earthquake-detail-top"><div><span className="hub-eyebrow">NAYAN / SHIP</span><div className="earthquake-magnitude">🚢</div></div><button className="earthquake-detail-close" onClick={() => setSelectedShip(null)} aria-label="Close ship details">×</button></div>
+        <div className="earthquake-place">{selectedShip.ship.name ?? `MMSI ${selectedShip.ship.mmsi}`}</div>
+        <div className="earthquake-meta-grid"><div><span>MMSI</span><strong>{selectedShip.ship.mmsi}</strong></div><div><span>SPEED</span><strong>{selectedShip.ship.speedKnots !== null ? `${selectedShip.ship.speedKnots.toFixed(1)} KN` : "—"}</strong></div><div><span>COURSE</span><strong>{selectedShip.ship.courseDeg !== null ? `${selectedShip.ship.courseDeg.toFixed(0)}°` : "—"}</strong></div><div><span>HEADING</span><strong>{selectedShip.ship.headingDeg !== null ? `${selectedShip.ship.headingDeg.toFixed(0)}°` : "—"}</strong></div></div>
+        <div className="earthquake-meta-grid"><div><span>LATITUDE</span><strong>{selectedShip.ship.latitude.toFixed(3)}°</strong></div><div><span>LONGITUDE</span><strong>{selectedShip.ship.longitude.toFixed(3)}°</strong></div><div><span>STATUS</span><strong>{selectedShip.ship.navigationStatus === null ? "UNKNOWN" : `AIS ${selectedShip.ship.navigationStatus}`}</strong></div><div><span>SEEN</span><strong>{formatUtc(selectedShip.ship.lastSeen)}</strong></div></div>
+        <a className="earthquake-source" href="https://aisstream.io" target="_blank" rel="noreferrer">AIS DATA VIA AISSTREAM <span>↗</span></a>
+      </aside>}
 
       {selectedAircraft && <aside className="earthquake-detail earthquake-detail--anchored" style={{ left: selectedAircraft.x > window.innerWidth / 2 ? Math.max(16, selectedAircraft.x - 356) : Math.min(Math.max(16, window.innerWidth - 356), selectedAircraft.x + 18), top: selectedAircraft.y > window.innerHeight / 2 ? Math.max(16, selectedAircraft.y - 320) : Math.min(Math.max(16, window.innerHeight - 320), selectedAircraft.y + 18), right: "auto", bottom: "auto", transform: "none", width: "min(340px, calc(100vw - 32px))" }}>
         <div className="earthquake-detail-top"><div><span className="hub-eyebrow">NAYAN / AIRCRAFT</span><div className="earthquake-magnitude">✈️</div></div><button className="earthquake-detail-close" onClick={() => setSelectedAircraft(null)} aria-label="Close aircraft details">×</button></div>
@@ -230,7 +261,7 @@ export default function ExplorePage() {
             const active = activeLayers.includes(layer.id);
             const satelliteRow = layer.id === "satellites";
             return <div key={layer.id} className={`layer-group ${satelliteRow && active ? "layer-group--expanded" : ""}`}>
-              <button className={`layer-row ${active ? "is-active" : ""}`} onClick={() => toggleLayer(layer.id)}><span className="layer-icon" aria-hidden="true">{layer.icon}</span><span className="layer-copy"><strong>{layer.label}</strong><small>{layer.detail}</small></span><span className="layer-status">{layer.status === "live" ? "LIVE" : "DEMO"}</span></button>
+              <button className={`layer-row ${active ? "is-active" : ""}`} onClick={() => toggleLayer(layer.id)}><span className="layer-icon" aria-hidden="true">{layer.icon}</span><span className="layer-copy"><strong>{layer.label}</strong><small>{layer.detail}</small></span><span className="layer-status">LIVE</span></button>
               {satelliteRow && active && <div className={`satellite-controls ${satelliteControlsOpen ? "is-open" : ""}`}>
                 <button className="satellite-filter-summary" onClick={() => setSatelliteControlsOpen((value) => !value)}><span>VIEW / {satelliteFilterLabel}</span><span>{satelliteControlsOpen ? "−" : "+"}</span></button>
                 {satelliteControlsOpen && <div className="satellite-filter-panel">
@@ -248,6 +279,7 @@ export default function ExplorePage() {
         {earthquakeCount !== null && activeLayers.includes("earthquakes") && <div className="hub-live-summary"><span>INDIA REGION / EARTHQUAKES</span><strong>{earthquakeCount} EVENTS LOADED</strong></div>}
         {naturalEventCount !== null && activeLayers.includes("events") && <div className="hub-live-summary"><span>INDIA REGION / NATURAL EVENTS</span><strong>{naturalEventCount} EVENTS LOADED</strong></div>}
         {satelliteActive && satelliteCount !== null && <div className="hub-live-summary"><span>ORBITAL CATALOG / {satelliteFilterLabel}</span><strong>{satelliteCount} DISPLAYED / {satelliteCatalogCount ?? "—"} CATALOG</strong></div>}
+        {activeLayers.includes("ships") && <div className="hub-live-summary"><span>INDIA REGION / SHIPS</span><strong>{shipConnected ? `${shipCount ?? 0} VESSELS · AISSTREAM LIVE` : "CONNECTING TO AISSTREAM"}</strong></div>}
         <div className="hub-footer"><span>DATA SYSTEM</span><span>FOUNDATION / 01</span></div>
       </aside>
       {notice && <button className="hub-notice" onClick={() => setNotice("")}><span className="notice-dot" />{notice}<b>×</b></button>}
