@@ -159,10 +159,13 @@ export default function NayanShipLayer() {
       if (!active || !viewer || viewer.isDestroyed()) return;
       const canvas = viewer.scene.canvas;
       const rect = canvas.getBoundingClientRect();
-      const picked = viewer.scene.pick({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+      const position = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const picked = viewer.scene.pick(position);
       const ship = picked?.primitive?._nayanShip as NayanShip | undefined;
       if (!ship || !CesiumRef) return;
 
+      event.stopPropagation();
+      event.stopImmediatePropagation();
       viewer.camera.flyTo({
         destination: CesiumRef.Cartesian3.fromDegrees(ship.longitude, ship.latitude, 180000),
         orientation: { heading: 0, pitch: CesiumRef.Math.toRadians(-90), roll: 0 },
@@ -190,7 +193,7 @@ export default function NayanShipLayer() {
 
     const canvasPoll = window.setInterval(() => {
       if (!viewer || viewer.isDestroyed() || viewer.scene?.canvas?.dataset.nayanShipsBound === "true") return;
-      viewer.scene.canvas.addEventListener("click", onCanvasClick);
+      viewer.scene.canvas.addEventListener("click", onCanvasClick, true);
       viewer.scene.canvas.dataset.nayanShipsBound = "true";
     }, 100);
 
@@ -201,7 +204,7 @@ export default function NayanShipLayer() {
       if (pollTimer !== null) window.clearInterval(pollTimer);
       if (readyPollTimer !== null) window.clearInterval(readyPollTimer);
       window.clearInterval(canvasPoll);
-      if (viewer?.scene?.canvas) viewer.scene.canvas.removeEventListener("click", onCanvasClick);
+      if (viewer?.scene?.canvas) viewer.scene.canvas.removeEventListener("click", onCanvasClick, true);
       clear();
     };
   }, []);
