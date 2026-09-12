@@ -1,8 +1,8 @@
 export const SHIP_REGION = {
   minLat: 0,
-  maxLat: 40,
+  maxLat: 30,
   minLon: 55,
-  maxLon: 105,
+  maxLon: 110,
 } as const;
 
 export type NayanShip = {
@@ -26,6 +26,18 @@ export type ShipLayerResponse = {
   connected: boolean;
   stale: boolean;
   error?: string;
+  diagnostics?: {
+    subscribed: boolean;
+    compressionEnabled: boolean | null;
+    connecting: boolean;
+    receivedMessages: number;
+    lastMessageType: string | null;
+    lastMessageAt: number;
+    lastCloseCode: number | null;
+    lastCloseReason: string | null;
+    implementation: string;
+    boundingBoxes: number[][][][];
+  };
 };
 
 export function isShipInRegion(latitude: number, longitude: number) {

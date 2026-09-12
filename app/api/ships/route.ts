@@ -1,3 +1,4 @@
+import WebSocket from "ws";
 import { normalizeAisPositionMessage, type NayanShip } from "../../../lib/data/ships/provider";
 
 export const runtime = "nodejs";
@@ -8,14 +9,16 @@ const SHIP_STALE_MS = 20 * 60 * 1000;
 const MAX_SHIPS = 2500;
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
+const SUBSCRIPTION_TIMEOUT_MS = 5_000;
+const STREAM_IMPLEMENTATION = "ws-permessage-deflate-v2";
 
-// Three focused strips give NAYAN broad India + nearby-water coverage while
-// avoiding spending the whole subscription on distant Southeast Asian traffic.
+// Three non-overlapping strips cover India plus nearby Arabian Sea, Bay of Bengal,
+// Sri Lanka and the eastern approaches without multiplying the same AIS traffic.
 // AISStream expects each corner as [latitude, longitude].
 const BOUNDING_BOXES = [
   [[0, 55], [30, 75]],
-  [[0, 70], [30, 95]],
-  [[0, 90], [30, 110]],
+  [[0, 75], [30, 92]],
+  [[0, 92], [30, 110]],
 ];
 
 const INDIA_REGION = {
@@ -25,18 +28,29 @@ const INDIA_REGION = {
   maxLon: 110,
 };
 
-const SUBSCRIPTION_SIGNATURE = JSON.stringify(BOUNDING_BOXES);
+const SUBSCRIPTION_SIGNATURE = JSON.stringify({
+  version: STREAM_IMPLEMENTATION,
+  boxes: BOUNDING_BOXES,
+});
 
 type ShipStreamState = {
   socket: WebSocket | null;
   ships: Map<string, NayanShip>;
   connected: boolean;
   connecting: boolean;
+  subscribed: boolean;
+  compressionEnabled: boolean | null;
   lastError: string | null;
+  lastMessageType: string | null;
+  lastMessageAt: number;
+  receivedMessages: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  subscriptionTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempt: number;
   fetchedAt: number;
   subscriptionSignature: string;
+  lastCloseCode: number | null;
+  lastCloseReason: string | null;
 };
 
 type NayanGlobal = typeof globalThis & {
@@ -48,16 +62,32 @@ const state = ((globalThis as NayanGlobal).__NAYAN_SHIP_STREAM__ ??= {
   ships: new Map(),
   connected: false,
   connecting: false,
+  subscribed: false,
+  compressionEnabled: null,
   lastError: null,
+  lastMessageType: null,
+  lastMessageAt: 0,
+  receivedMessages: 0,
   reconnectTimer: null,
+  subscriptionTimer: null,
   reconnectAttempt: 0,
   fetchedAt: 0,
   subscriptionSignature: "",
+  lastCloseCode: null,
+  lastCloseReason: null,
 });
 
 function resetForSubscriptionChange() {
   if (state.subscriptionSignature === SUBSCRIPTION_SIGNATURE) return;
 
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+  if (state.subscriptionTimer) {
+    clearTimeout(state.subscriptionTimer);
+    state.subscriptionTimer = null;
+  }
   if (state.socket) {
     try {
       state.socket.close();
@@ -69,10 +99,17 @@ function resetForSubscriptionChange() {
   state.socket = null;
   state.connected = false;
   state.connecting = false;
+  state.subscribed = false;
+  state.compressionEnabled = null;
   state.ships.clear();
   state.fetchedAt = 0;
   state.lastError = null;
+  state.lastMessageType = null;
+  state.lastMessageAt = 0;
+  state.receivedMessages = 0;
   state.reconnectAttempt = 0;
+  state.lastCloseCode = null;
+  state.lastCloseReason = null;
   state.subscriptionSignature = SUBSCRIPTION_SIGNATURE;
 }
 
@@ -98,19 +135,10 @@ function pruneShips() {
   for (const ship of sorted.slice(0, MAX_SHIPS)) state.ships.set(ship.mmsi, ship);
 }
 
-async function decodeMessage(data: unknown): Promise<string | null> {
-  if (typeof data === "string") return data;
-  if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
-  if (ArrayBuffer.isView(data)) {
-    return new TextDecoder().decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-  }
-  if (typeof Blob !== "undefined" && data instanceof Blob) return data.text();
-  return null;
-}
-
 function scheduleReconnect() {
-  if (state.reconnectTimer || !process.env.AISSTREAM_API_KEY) return;
-  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** state.reconnectAttempt);
+  if (state.reconnectTimer || state.connecting || state.connected || !process.env.AISSTREAM_API_KEY) return;
+  const jitter = Math.floor(Math.random() * 750);
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** state.reconnectAttempt) + jitter;
   state.reconnectAttempt += 1;
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
@@ -121,10 +149,6 @@ function scheduleReconnect() {
 async function ensureShipStream() {
   const apiKey = process.env.AISSTREAM_API_KEY;
   if (!apiKey || state.connected || state.connecting) return;
-  if (typeof WebSocket === "undefined") {
-    state.lastError = "This Node.js runtime does not provide WebSocket support.";
-    return;
-  }
 
   resetForSubscriptionChange();
   if (state.connected || state.connecting) return;
@@ -133,52 +157,100 @@ async function ensureShipStream() {
   state.lastError = null;
 
   try {
-    const socket = new WebSocket(AISSTREAM_URL);
+    const socket = new WebSocket(AISSTREAM_URL, {
+      perMessageDeflate: true,
+      handshakeTimeout: 15_000,
+    });
     state.socket = socket;
 
-    socket.addEventListener("open", () => {
+    socket.on("open", () => {
+      if (state.socket !== socket) return;
       state.connecting = false;
-      state.connected = true;
-      state.reconnectAttempt = 0;
       state.lastError = null;
+      state.subscribed = false;
+      state.compressionEnabled = null;
 
       socket.send(JSON.stringify({
         APIKey: apiKey,
         BoundingBoxes: BOUNDING_BOXES,
         FilterMessageTypes: ["PositionReport"],
       }));
+
+      if (state.subscriptionTimer) clearTimeout(state.subscriptionTimer);
+      state.subscriptionTimer = setTimeout(() => {
+        if (state.socket !== socket || state.subscribed) return;
+        state.lastError = "AISStream subscription confirmation timed out.";
+        try {
+          socket.close(4000, "Subscription confirmation timeout");
+        } catch {
+          // Socket may already be closing.
+        }
+      }, SUBSCRIPTION_TIMEOUT_MS);
     });
 
-    socket.addEventListener("message", async (event) => {
+    socket.on("message", (data) => {
+      if (state.socket !== socket) return;
+
       try {
-        const raw = await decodeMessage(event.data);
-        if (!raw) return;
+        const raw = data.toString("utf8");
         const payload = JSON.parse(raw);
+        state.receivedMessages += 1;
+        state.lastMessageAt = Date.now();
+        state.lastMessageType = typeof payload?.MessageType === "string" ? payload.MessageType : null;
+
+        if (payload?.MessageType === "SubscriptionConfirmation") {
+          state.subscribed = true;
+          state.connected = true;
+          state.compressionEnabled = payload?.Message?.SubscriptionConfirmation?.CompressionEnabled === true;
+          if (state.subscriptionTimer) {
+            clearTimeout(state.subscriptionTimer);
+            state.subscriptionTimer = null;
+          }
+          return;
+        }
+
         const ship = normalizeAisPositionMessage(payload);
         if (!ship || !isInIndiaRegion(ship)) return;
         state.ships.set(ship.mmsi, ship);
         state.fetchedAt = Date.now();
         pruneShips();
       } catch (error) {
-        console.warn("NAYAN AIS message decode failed:", error);
+        state.lastError = error instanceof Error ? `AISStream message decode failed: ${error.message}` : "AISStream message decode failed.";
       }
     });
 
-    socket.addEventListener("error", () => {
-      state.lastError = "AISStream connection error.";
+    socket.on("error", (error) => {
+      if (state.socket !== socket) return;
+      state.lastError = error instanceof Error ? `AISStream socket error: ${error.message}` : "AISStream socket error.";
     });
 
-    socket.addEventListener("close", () => {
+    socket.on("close", (code, reason) => {
+      if (state.socket !== socket) return;
+
+      if (state.subscriptionTimer) {
+        clearTimeout(state.subscriptionTimer);
+        state.subscriptionTimer = null;
+      }
+
       state.connected = false;
       state.connecting = false;
+      state.subscribed = false;
       state.socket = null;
+      state.lastCloseCode = code;
+      state.lastCloseReason = reason.toString("utf8");
+
+      if (!state.lastError) {
+        state.lastError = `AISStream closed (${code}${state.lastCloseReason ? `: ${state.lastCloseReason}` : ""}).`;
+      }
+
       scheduleReconnect();
     });
   } catch (error) {
     state.connected = false;
     state.connecting = false;
+    state.subscribed = false;
     state.socket = null;
-    state.lastError = error instanceof Error ? error.message : "AISStream connection failed.";
+    state.lastError = error instanceof Error ? `AISStream connection failed: ${error.message}` : "AISStream connection failed.";
     scheduleReconnect();
   }
 }
@@ -200,14 +272,25 @@ export async function GET() {
   pruneShips();
 
   const ships = [...state.ships.values()].sort((a, b) => b.lastSeen - a.lastSeen);
-  const fetchedAt = state.fetchedAt;
 
   return Response.json({
     ships,
-    fetchedAt,
+    fetchedAt: state.fetchedAt,
     source: "aisstream",
     connected: state.connected,
-    stale: !fetchedAt || Date.now() - fetchedAt > 60_000,
+    stale: !state.fetchedAt || Date.now() - state.fetchedAt > 60_000,
+    diagnostics: {
+      subscribed: state.subscribed,
+      compressionEnabled: state.compressionEnabled,
+      connecting: state.connecting,
+      receivedMessages: state.receivedMessages,
+      lastMessageType: state.lastMessageType,
+      lastMessageAt: state.lastMessageAt,
+      lastCloseCode: state.lastCloseCode,
+      lastCloseReason: state.lastCloseReason,
+      implementation: STREAM_IMPLEMENTATION,
+      boundingBoxes: BOUNDING_BOXES,
+    },
     ...(state.lastError ? { error: state.lastError } : {}),
   }, {
     headers: {
