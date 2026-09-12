@@ -22,6 +22,7 @@ const installViewerBridge = () => {
   const Cesium = window.Cesium;
   if (!Cesium || (Cesium as any).__nayanViewerBridgeInstalled) return;
 
+  const descriptor = Object.getOwnPropertyDescriptor(Cesium, "Viewer");
   const OriginalViewer = Cesium.Viewer;
   if (typeof OriginalViewer !== "function") return;
 
@@ -34,8 +35,18 @@ const installViewerBridge = () => {
     },
   });
 
-  Cesium.Viewer = ViewerProxy;
-  (Cesium as any).__nayanViewerBridgeInstalled = true;
+  try {
+    if (descriptor?.configurable) {
+      Object.defineProperty(Cesium, "Viewer", {
+        configurable: true,
+        enumerable: descriptor.enumerable ?? true,
+        get: () => ViewerProxy,
+      });
+      (Cesium as any).__nayanViewerBridgeInstalled = true;
+    }
+  } catch (error) {
+    console.warn("NAYAN could not install the Cesium viewer bridge:", error);
+  }
 };
 
 export default function NayanShipLayer() {
@@ -65,20 +76,17 @@ export default function NayanShipLayer() {
     const render = (shipList: NayanShip[]) => {
       const collection = ensureCollection();
       if (!collection || !CesiumRef) return;
-
       const seen = new Set<string>();
       for (const ship of shipList) {
         seen.add(ship.mmsi);
         const existing = shipBillboards.get(ship.mmsi);
         const position = CesiumRef.Cartesian3.fromDegrees(ship.longitude, ship.latitude, 40);
-
         if (existing) {
           existing.position = position;
           existing.rotation = ship.courseDeg !== null ? CesiumRef.Math.toRadians(-ship.courseDeg) : 0;
           existing._nayanShip = ship;
           continue;
         }
-
         const billboard = collection.add({
           id: `nayan-ship-${ship.mmsi}`,
           image: SHIP_GLYPH_URL,
@@ -96,13 +104,11 @@ export default function NayanShipLayer() {
         billboard._nayanShip = ship;
         shipBillboards.set(ship.mmsi, billboard);
       }
-
       for (const [mmsi, billboard] of shipBillboards) {
         if (seen.has(mmsi)) continue;
         collection.remove(billboard);
         shipBillboards.delete(mmsi);
       }
-
       viewer.scene.requestRender();
       window.dispatchEvent(new CustomEvent("nayan:ships-loaded", { detail: { count: shipList.length } }));
     };
@@ -118,9 +124,7 @@ export default function NayanShipLayer() {
         if (result.error) window.dispatchEvent(new CustomEvent("nayan:ships-error", { detail: { message: result.error } }));
       } catch (error) {
         if ((error as Error)?.name === "AbortError") return;
-        window.dispatchEvent(new CustomEvent("nayan:ships-error", {
-          detail: { message: error instanceof Error ? error.message : "Unable to load ship data." },
-        }));
+        window.dispatchEvent(new CustomEvent("nayan:ships-error", { detail: { message: error instanceof Error ? error.message : "Unable to load ship data." } }));
       }
     };
 
@@ -159,11 +163,9 @@ export default function NayanShipLayer() {
       if (!active || !viewer || viewer.isDestroyed()) return;
       const canvas = viewer.scene.canvas;
       const rect = canvas.getBoundingClientRect();
-      const position = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      const picked = viewer.scene.pick(position);
+      const picked = viewer.scene.pick({ x: event.clientX - rect.left, y: event.clientY - rect.top });
       const ship = picked?.primitive?._nayanShip as NayanShip | undefined;
       if (!ship || !CesiumRef) return;
-
       event.stopPropagation();
       event.stopImmediatePropagation();
       viewer.camera.flyTo({
@@ -172,9 +174,7 @@ export default function NayanShipLayer() {
         duration: 1.2,
         easingFunction: CesiumRef.EasingFunction.CUBIC_IN_OUT,
       });
-      window.dispatchEvent(new CustomEvent("nayan:ship-selected", {
-        detail: { ship, x: event.clientX, y: event.clientY },
-      }));
+      window.dispatchEvent(new CustomEvent("nayan:ship-selected", { detail: { ship, x: event.clientX, y: event.clientY } }));
     };
 
     window.addEventListener("nayan:ships-toggle", onToggle);
