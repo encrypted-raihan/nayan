@@ -7,8 +7,7 @@ declare global {
   interface Window {
     Cesium?: any;
     __NAYAN_CESIUM_VIEWER__?: any;
-    __NAYAN_CESIUM_NAMESPACE_PROXY__?: any;
-    __NAYAN_CESIUM_NAMESPACE_ORIGINAL__?: any;
+    __NAYAN_CESIUM_BRIDGE_INSTALLED__?: boolean;
   }
 }
 
@@ -20,12 +19,12 @@ const SHIP_GLYPH = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
 </svg>`)} `;
 const SHIP_GLYPH_URL = SHIP_GLYPH.trim();
 
-function installViewerBridge() {
-  const Cesium = window.Cesium;
-  if (!Cesium || window.__NAYAN_CESIUM_NAMESPACE_PROXY__) return;
+function bridgeCesiumNamespace(Cesium: any) {
+  if (!Cesium || typeof Cesium !== "object") return Cesium;
+  if (Cesium.__NAYAN_SHIP_BRIDGED__) return Cesium;
 
   const OriginalViewer = Cesium.Viewer;
-  if (typeof OriginalViewer !== "function") return;
+  if (typeof OriginalViewer !== "function") return Cesium;
 
   const ViewerProxy = new Proxy(OriginalViewer, {
     construct(target, args) {
@@ -43,20 +42,56 @@ function installViewerBridge() {
     },
   });
 
-  window.__NAYAN_CESIUM_NAMESPACE_ORIGINAL__ = Cesium;
-  window.__NAYAN_CESIUM_NAMESPACE_PROXY__ = namespaceProxy;
-  window.Cesium = namespaceProxy;
+  try {
+    Object.defineProperty(namespaceProxy, "__NAYAN_SHIP_BRIDGED__", {
+      value: true,
+      configurable: true,
+    });
+  } catch {
+    // Marker is optional; the proxy itself is sufficient.
+  }
+
+  return namespaceProxy;
+}
+
+function installCesiumSetterBridge() {
+  if (window.__NAYAN_CESIUM_BRIDGE_INSTALLED__) return;
+
+  const descriptor = Object.getOwnPropertyDescriptor(window, "Cesium");
+  if (descriptor && descriptor.configurable === false) return;
+
+  let current = window.Cesium;
+  let bridged = bridgeCesiumNamespace(current);
+  if (bridged !== current) current = bridged;
+
+  Object.defineProperty(window, "Cesium", {
+    configurable: true,
+    enumerable: descriptor?.enumerable ?? true,
+    get() {
+      return current;
+    },
+    set(value) {
+      current = bridgeCesiumNamespace(value);
+    },
+  });
+
+  window.__NAYAN_CESIUM_BRIDGE_INSTALLED__ = true;
+
+  if (current?.Viewer && typeof current.Viewer === "function") {
+    // The getter/setter above now guarantees that a future Viewer construction
+    // passes through ViewerProxy. If a viewer already exists, the globe layer
+    // will publish it separately through the ready event.
+  }
 }
 
 export default function NayanShipLayer() {
   useEffect(() => {
-    let viewer: any = null;
-    let CesiumRef: any = null;
+    let viewer: any = window.__NAYAN_CESIUM_VIEWER__ ?? null;
+    let CesiumRef: any = window.Cesium ?? null;
     let shipsBillboards: any = null;
     const shipBillboards = new Map<string, any>();
     let active = false;
     let pollTimer: number | null = null;
-    let readyPollTimer: number | null = null;
     let abortController: AbortController | null = null;
 
     const clear = () => {
@@ -200,16 +235,16 @@ export default function NayanShipLayer() {
     window.addEventListener("nayan:ships-toggle", onToggle);
     window.addEventListener("nayan:cesium-viewer-ready", onViewerReady);
 
-    const tryInstall = () => {
-      installViewerBridge();
+    installCesiumSetterBridge();
+    viewer = window.__NAYAN_CESIUM_VIEWER__ ?? viewer;
+    CesiumRef = window.Cesium ?? CesiumRef;
+
+    const viewerReadyPoll = window.setInterval(() => {
       if (window.__NAYAN_CESIUM_VIEWER__) {
         viewer = window.__NAYAN_CESIUM_VIEWER__;
         CesiumRef = window.Cesium;
       }
-    };
-
-    tryInstall();
-    readyPollTimer = window.setInterval(tryInstall, 25);
+    }, 100);
 
     const canvasPoll = window.setInterval(() => {
       if (!viewer || viewer.isDestroyed() || viewer.scene?.canvas?.dataset.nayanShipsBound === "true") return;
@@ -222,16 +257,10 @@ export default function NayanShipLayer() {
       window.removeEventListener("nayan:cesium-viewer-ready", onViewerReady);
       abortController?.abort();
       if (pollTimer !== null) window.clearInterval(pollTimer);
-      if (readyPollTimer !== null) window.clearInterval(readyPollTimer);
+      window.clearInterval(viewerReadyPoll);
       window.clearInterval(canvasPoll);
       if (viewer?.scene?.canvas) viewer.scene.canvas.removeEventListener("click", onCanvasClick, true);
       clear();
-
-      if (window.__NAYAN_CESIUM_NAMESPACE_PROXY__) {
-        window.Cesium = window.__NAYAN_CESIUM_NAMESPACE_ORIGINAL__;
-        delete window.__NAYAN_CESIUM_NAMESPACE_PROXY__;
-        delete window.__NAYAN_CESIUM_NAMESPACE_ORIGINAL__;
-      }
     };
   }, []);
 
