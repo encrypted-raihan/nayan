@@ -9,11 +9,23 @@ const MAX_SHIPS = 2500;
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
 
+// Three focused strips give NAYAN broad India + nearby-water coverage while
+// avoiding spending the whole subscription on distant Southeast Asian traffic.
+// AISStream expects each corner as [latitude, longitude].
 const BOUNDING_BOXES = [
-  [[5, 55], [25, 78]],
-  [[5, 75], [25, 105]],
-  [[0, 65], [12, 105]],
+  [[0, 55], [30, 75]],
+  [[0, 70], [30, 95]],
+  [[0, 90], [30, 110]],
 ];
+
+const INDIA_REGION = {
+  minLat: 0,
+  maxLat: 30,
+  minLon: 55,
+  maxLon: 110,
+};
+
+const SUBSCRIPTION_SIGNATURE = JSON.stringify(BOUNDING_BOXES);
 
 type ShipStreamState = {
   socket: WebSocket | null;
@@ -24,6 +36,7 @@ type ShipStreamState = {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempt: number;
   fetchedAt: number;
+  subscriptionSignature: string;
 };
 
 type NayanGlobal = typeof globalThis & {
@@ -39,12 +52,43 @@ const state = ((globalThis as NayanGlobal).__NAYAN_SHIP_STREAM__ ??= {
   reconnectTimer: null,
   reconnectAttempt: 0,
   fetchedAt: 0,
+  subscriptionSignature: "",
 });
+
+function resetForSubscriptionChange() {
+  if (state.subscriptionSignature === SUBSCRIPTION_SIGNATURE) return;
+
+  if (state.socket) {
+    try {
+      state.socket.close();
+    } catch {
+      // Socket may already be closing.
+    }
+  }
+
+  state.socket = null;
+  state.connected = false;
+  state.connecting = false;
+  state.ships.clear();
+  state.fetchedAt = 0;
+  state.lastError = null;
+  state.reconnectAttempt = 0;
+  state.subscriptionSignature = SUBSCRIPTION_SIGNATURE;
+}
+
+function isInIndiaRegion(ship: NayanShip) {
+  return (
+    ship.latitude >= INDIA_REGION.minLat &&
+    ship.latitude <= INDIA_REGION.maxLat &&
+    ship.longitude >= INDIA_REGION.minLon &&
+    ship.longitude <= INDIA_REGION.maxLon
+  );
+}
 
 function pruneShips() {
   const cutoff = Date.now() - SHIP_STALE_MS;
   for (const [mmsi, ship] of state.ships) {
-    if (ship.lastSeen < cutoff) state.ships.delete(mmsi);
+    if (ship.lastSeen < cutoff || !isInIndiaRegion(ship)) state.ships.delete(mmsi);
   }
 
   if (state.ships.size <= MAX_SHIPS) return;
@@ -82,6 +126,9 @@ async function ensureShipStream() {
     return;
   }
 
+  resetForSubscriptionChange();
+  if (state.connected || state.connecting) return;
+
   state.connecting = true;
   state.lastError = null;
 
@@ -108,7 +155,7 @@ async function ensureShipStream() {
         if (!raw) return;
         const payload = JSON.parse(raw);
         const ship = normalizeAisPositionMessage(payload);
-        if (!ship) return;
+        if (!ship || !isInIndiaRegion(ship)) return;
         state.ships.set(ship.mmsi, ship);
         state.fetchedAt = Date.now();
         pruneShips();
@@ -148,6 +195,7 @@ export async function GET() {
     }, { status: 503 });
   }
 
+  resetForSubscriptionChange();
   void ensureShipStream();
   pruneShips();
 
