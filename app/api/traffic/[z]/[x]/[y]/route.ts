@@ -3,8 +3,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TOMTOM_TRAFFIC_URL = "https://api.tomtom.com/maps/orbis/traffic/flow/raster/tile";
-const INDIA_BOUNDS = { minLat: 0, maxLat: 30, minLon: 55, maxLon: 110 } as const;
+const HERE_TRAFFIC_URL = "https://traffic.maps.hereapi.com/v3/flow/mc";
 
 function isIntegerInRange(value: string, min: number, max: number) {
   const parsed = Number(value);
@@ -15,10 +14,10 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ z: string; x: string; y: string }> },
 ) {
-  const apiKey = process.env.TOMTOM_API_KEY?.trim();
+  const apiKey = process.env.HERE_API_KEY?.trim();
   if (!apiKey) {
     return NextResponse.json(
-      { error: "TOMTOM_API_KEY is not configured." },
+      { error: "HERE_API_KEY is not configured." },
       { status: 503 },
     );
   }
@@ -34,17 +33,10 @@ export async function GET(
     return NextResponse.json({ error: "Invalid tile coordinates." }, { status: 400 });
   }
 
-  // Traffic is intentionally limited to NAYAN's India-first operating region.
-  // Cesium's rectangle prevents most out-of-region requests; this route also
-  // remains bounded conceptually if it is called directly.
-  void INDIA_BOUNDS;
-
   const upstream = await fetch(
-    `${TOMTOM_TRAFFIC_URL}/${zoom}/${Number(x)}/${Number(y)}?apiVersion=2&style=light&tileSize=256`,
+    `${HERE_TRAFFIC_URL}/${zoom}/${Number(x)}/${Number(y)}/png?apiKey=${encodeURIComponent(apiKey)}`,
     {
       headers: {
-        "TomTom-Api-Key": apiKey,
-        "TomTom-Api-Version": "2",
         Accept: "image/png",
       },
       cache: "no-store",
@@ -53,7 +45,7 @@ export async function GET(
 
   if (!upstream.ok) {
     const body = await upstream.text().catch(() => "");
-    return new NextResponse(body || "Traffic tile unavailable.", {
+    return new NextResponse(body || "HERE traffic tile unavailable.", {
       status: upstream.status,
       headers: {
         "Content-Type": upstream.headers.get("content-type") ?? "text/plain; charset=utf-8",
@@ -68,7 +60,7 @@ export async function GET(
     headers: {
       "Content-Type": "image/png",
       "Cache-Control": "public, max-age=45, stale-while-revalidate=15",
-      "X-Nayan-Traffic-Source": "TomTom Traffic Flow",
+      "X-Nayan-Traffic-Source": "HERE Traffic Flow",
     },
   });
 }
