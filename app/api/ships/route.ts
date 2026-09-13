@@ -9,7 +9,7 @@ const MAX_SHIPS = 2500;
 const RECONNECT_BASE_MS = 2_000;
 const RECONNECT_MAX_MS = 30_000;
 const SUBSCRIPTION_TIMEOUT_MS = 5_000;
-const STREAM_IMPLEMENTATION = "node-native-websocket";
+const STREAM_IMPLEMENTATION = "node-native-websocket-binary-decoder";
 
 // Three non-overlapping strips cover India plus nearby Arabian Sea, Bay of Bengal,
 // Sri Lanka and the eastern approaches without multiplying the same AIS traffic.
@@ -146,6 +146,24 @@ function scheduleReconnect() {
   }, delay);
 }
 
+async function decodeWebSocketData(data: unknown): Promise<string> {
+  if (typeof data === "string") return data;
+
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data));
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder().decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+  }
+
+  if (typeof Blob !== "undefined" && data instanceof Blob) {
+    return new TextDecoder().decode(new Uint8Array(await data.arrayBuffer()));
+  }
+
+  throw new Error(`Unsupported AISStream WebSocket frame type: ${Object.prototype.toString.call(data)}`);
+}
+
 async function ensureShipStream() {
   const apiKey = process.env.AISSTREAM_API_KEY;
   if (!apiKey || state.connected || state.connecting) return;
@@ -157,8 +175,8 @@ async function ensureShipStream() {
   state.lastError = null;
 
   try {
-    // Node 22.5+ provides a native WebSocket implementation. Using it here
-    // avoids Next.js bundling ws/bufferutil into the server route incorrectly.
+    // Node 22.4+ provides a native WebSocket implementation. AISStream sends
+    // binary UTF-8 JSON frames, so the message handler decodes them explicitly.
     const socket = new WebSocket(AISSTREAM_URL);
     state.socket = socket;
 
@@ -192,39 +210,39 @@ async function ensureShipStream() {
     socket.addEventListener("message", (event) => {
       if (state.socket !== socket) return;
 
-      try {
-        const raw = typeof event.data === "string"
-          ? event.data
-          : String(event.data);
-        const payload = JSON.parse(raw);
+      void (async () => {
+        try {
+          const raw = await decodeWebSocketData(event.data);
+          const payload = JSON.parse(raw);
 
-        state.receivedMessages += 1;
-        state.lastMessageAt = Date.now();
-        state.lastMessageType = typeof payload?.MessageType === "string" ? payload.MessageType : null;
+          state.receivedMessages += 1;
+          state.lastMessageAt = Date.now();
+          state.lastMessageType = typeof payload?.MessageType === "string" ? payload.MessageType : null;
 
-        if (payload?.MessageType === "SubscriptionConfirmation") {
-          state.subscribed = true;
-          state.connected = true;
-          state.compressionEnabled = payload?.Message?.SubscriptionConfirmation?.CompressionEnabled === true;
+          if (payload?.MessageType === "SubscriptionConfirmation") {
+            state.subscribed = true;
+            state.connected = true;
+            state.compressionEnabled = payload?.Message?.SubscriptionConfirmation?.CompressionEnabled === true;
 
-          if (state.subscriptionTimer) {
-            clearTimeout(state.subscriptionTimer);
-            state.subscriptionTimer = null;
+            if (state.subscriptionTimer) {
+              clearTimeout(state.subscriptionTimer);
+              state.subscriptionTimer = null;
+            }
+            return;
           }
-          return;
+
+          const ship = normalizeAisPositionMessage(payload);
+          if (!ship || !isInIndiaRegion(ship)) return;
+
+          state.ships.set(ship.mmsi, ship);
+          state.fetchedAt = Date.now();
+          pruneShips();
+        } catch (error) {
+          state.lastError = error instanceof Error
+            ? `AISStream message decode failed: ${error.message}`
+            : "AISStream message decode failed.";
         }
-
-        const ship = normalizeAisPositionMessage(payload);
-        if (!ship || !isInIndiaRegion(ship)) return;
-
-        state.ships.set(ship.mmsi, ship);
-        state.fetchedAt = Date.now();
-        pruneShips();
-      } catch (error) {
-        state.lastError = error instanceof Error
-          ? `AISStream message decode failed: ${error.message}`
-          : "AISStream message decode failed.";
-      }
+      })();
     });
 
     socket.addEventListener("error", () => {
