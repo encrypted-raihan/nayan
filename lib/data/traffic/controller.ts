@@ -96,7 +96,7 @@ function createTrafficProvider(Cesium: any) {
     tileHeight: 256,
     hasAlphaChannel: true,
     enablePickFeatures: false,
-    credit: new Cesium.Credit("Traffic © TomTom"),
+    credit: new Cesium.Credit("Traffic © HERE"),
   });
 }
 
@@ -113,7 +113,7 @@ function addTrafficLayer() {
     if (!runtime().enabled) return;
     setStatus("ERROR");
     window.dispatchEvent(new CustomEvent("nayan:traffic-error", {
-      detail: { message: "TomTom traffic tiles could not be loaded." },
+      detail: { message: "HERE traffic tiles could not be loaded." },
     }));
   });
 
@@ -150,7 +150,7 @@ async function showTraffic() {
 
   scheduleTrafficRefresh();
   window.dispatchEvent(new CustomEvent("nayan:traffic-loaded", {
-    detail: { source: "tomtom", region: "india" },
+    detail: { source: "here", region: "india" },
   }));
 }
 
